@@ -6,13 +6,19 @@
 
 module Automata.Internal
   ( -- * Types
-    Dfa(..)
-  , Nfa(..)
-  , TransitionNfa(..)
+    Dfsa(..)
+  , Nfsa(..)
+  , TransitionNfsa(..)
+    -- * Builder Types
+  , State(..)
+  , Epsilon(..)
     -- * NFA Functions 
-  , toDfa
+  , toDfsa
   , append
-  , evaluate
+  , empty
+  , rejectionNfsa
+  , unionNfsa
+  , epsilonClosure
     -- * DFA Functions
   , union
   , intersection
@@ -24,7 +30,6 @@ module Automata.Internal
 import Control.Applicative (liftA2)
 import Control.Monad (forM_,(<=<))
 import Control.Monad.ST (runST)
-import Control.Monad.Trans.State.Strict (State)
 import Data.Foldable (foldl',toList)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe,isNothing,mapMaybe)
@@ -47,7 +52,7 @@ import qualified GHC.Exts as E
 import qualified Data.Semiring
 
 -- The start state is always zero.
-data Dfa t = Dfa
+data Dfsa t = Dfsa
   { dfaTransition :: !(Array (DM.Map t Int))
     -- ^ Given a state and transition, this field tells you what
     --   state to go to next. The length of this array must match
@@ -63,6 +68,8 @@ data Dfa t = Dfa
 -- * There is only one start state.
 -- * We use the Thompson encoding. This means that there is an epsilon
 --   transition that consumes no input.
+-- * We store the full epsilon closure for every state. This means that,
+--   when evaluating the NFA, we do not ever need to compute the closure.
 -- * There is no Eq instance for NFA. In general, this can take exponential
 --   time. If you really need to do this, convert the NFA to a DFA.
 --
@@ -70,8 +77,8 @@ data Dfa t = Dfa
 -- 
 -- * The start state is always the state at position 0.
 -- * The length of nfaTransition is given by nfaStates.
-data Nfa t = Nfa
-  { nfaTransition :: !(Array (TransitionNfa t))
+data Nfsa t = Nfsa
+  { nfaTransition :: !(Array (TransitionNfsa t))
     -- ^ Given a state and transition, this field tells you what
     --   state to go to next. The length of this array must match
     --   the total number of states. The data structure inside is
@@ -80,11 +87,11 @@ data Nfa t = Nfa
   , nfaFinal :: !(SU.Set Int)
     -- ^ A string that ends in any of these set of states is
     --   considered to have been accepted by the grammar.
-  } deriving (Eq,Show)
+  } deriving (Show)
 
-data TransitionNfa t = TransitionNfa
-  { transitionNfaEpsilon :: {-# UNPACK #-} !(SU.Set Int)
-  , transitionNfaConsume :: {-# UNPACK #-} !(DM.Map t (SU.Set Int))
+data TransitionNfsa t = TransitionNfsa
+  { transitionNfsaEpsilon :: {-# UNPACK #-} !(SU.Set Int)
+  , transitionNfsaConsume :: {-# UNPACK #-} !(DM.Map t (SU.Set Int))
   } deriving (Eq,Show)
 
 data Conversion = Conversion
@@ -100,32 +107,34 @@ data Conversion = Conversion
     -- The keys in this should all be less than the label.
   }
 
-append :: Nfa t -> Nfa t -> Nfa t
-append (Nfa t1 f1) (Nfa t2 f2) = 
+append :: Nfsa t -> Nfsa t -> Nfsa t
+append (Nfsa t1 f1) (Nfsa t2 f2) = 
   let n1 = C.size t1
       n2 = C.size t2
       n3 = n1 + n2
       f3 = SU.mapMonotonic (+n1) f2
-      t3 = fmap (\(TransitionNfa eps consume) -> TransitionNfa (SU.mapMonotonic (+n1) eps) (DM.mapBijection (SU.mapMonotonic (+n1)) consume)) t2
+      t3 = fmap (\(TransitionNfsa eps consume) -> TransitionNfsa (SU.mapMonotonic (+n1) eps) (DM.mapBijection (SU.mapMonotonic (+n1)) consume)) t2
+      t4 = fmap (\(TransitionNfsa eps consume) -> TransitionNfsa eps (DM.mapBijection (\states -> if SU.null (SU.intersection states f1) then states else states <> transitionNfsaEpsilon (C.index t3 0)) consume)) t1
       !(# placeholder #) = C.index# t1 0
-      t4 = runST $ do
+      t5 = runST $ do
         m <- C.replicateM n3 placeholder
-        C.copy m 0 t1 0 n1
+        C.copy m 0 t4 0 n1
         C.copy m n1 t3 0 n2
-        flip C.itraverse_ t1 $ \ix (TransitionNfa epsilon consume) -> do
-          let transition = TransitionNfa (epsilon <> SU.singleton n1) consume
+        flip SU.traverse_ f1 $ \ix -> do
+          TransitionNfsa epsilon consume <- C.read m ix
+          let transition = TransitionNfsa (epsilon <> transitionNfsaEpsilon (C.index t3 0)) consume
           C.write m ix transition
         C.unsafeFreeze m
-   in Nfa t4 f3
+   in Nfsa t5 f3
 
-nextIdentifier :: State Conversion Int
+nextIdentifier :: State.State Conversion Int
 nextIdentifier = do
   Conversion n a b c <- State.get 
   State.put (Conversion (n + 1) a b c)
   return n
 
 -- Mark a new state as having been completed.
-complete :: Int -> State Conversion ()
+complete :: Int -> State.State Conversion ()
 complete s = do
   c <- State.get
   State.put c
@@ -134,7 +143,7 @@ complete s = do
     }
 
 -- Convert the subset of NFA states to a single DFA state.
-resolveSubset :: Array (TransitionNfa t) -> SU.Set Int -> State Conversion Int
+resolveSubset :: Array (TransitionNfsa t) -> SU.Set Int -> State.State Conversion Int
 resolveSubset transitions s0 = do
   let s = epsilonClosure transitions s0
   Conversion _ resolutions0 _ _ <- State.get
@@ -150,20 +159,20 @@ resolveSubset transitions s0 = do
     Just ident -> return ident
   
 
-epsilonClosure :: Array (TransitionNfa t) -> SU.Set Int -> SU.Set Int
+epsilonClosure :: Array (TransitionNfsa t) -> SU.Set Int -> SU.Set Int
 epsilonClosure s states = go states SU.empty where
   go new old = if new == old
     then new
     else
       let together = old <> new
-       in go (mconcat (map (\ident -> transitionNfaEpsilon (indexArray s ident)) (SU.toList together)) <> together) together
+       in go (mconcat (map (\ident -> transitionNfsaEpsilon (indexArray s ident)) (SU.toList together)) <> together) together
 
 data Node t = Node
   !Int -- identifier
   !(DM.Map t Int) -- transitions
 
-toDfa :: forall t. (Ord t, Bounded t, Enum t) => Nfa t -> Dfa t
-toDfa (Nfa t0 f0) = runST $ do
+toDfsa :: forall t. (Ord t, Bounded t, Enum t) => Nfsa t -> Dfsa t
+toDfsa (Nfsa t0 f0) = runST $ do
   let ((len,nodes),c) = State.runState
         (go 0 [])
         (Conversion 1 (M.singleton startClosure 0) S.empty (M.singleton 0 startClosure))
@@ -175,35 +184,24 @@ toDfa (Nfa t0 f0) = runST $ do
   where
   startClosure :: SU.Set Int
   startClosure = epsilonClosure t0 (SU.singleton 0)
-  go :: Int -> [Node t] -> State Conversion (Int, [Node t])
+  go :: Int -> [Node t] -> State.State Conversion (Int, [Node t])
   go !n !edges0 = do
     Conversion _ _ _ pending <- State.get
     case M.foldMapWithKey (\k v -> Just (First (k,v))) pending of
       Nothing -> return (n, edges0)
       Just (First (m,states)) -> do
-        t <- DM.traverseBijection (resolveSubset t0) (mconcat (map (transitionNfaConsume . indexArray t0) (SU.toList states)))
+        t <- DM.traverseBijection (resolveSubset t0) (mconcat (map (transitionNfsaConsume . indexArray t0) (SU.toList states)))
         complete m
         go (n + 1) (Node m t : edges0)
 
-evaluate :: (Foldable f, Ord t) => Nfa t -> f t -> Bool
-evaluate (Nfa transitions finals) tokens = not $ SU.null $ SU.intersection
-  ( foldl'
-    ( \(active :: SU.Set Int) token -> mconcat $ SU.foldl'
-      (\xs state -> DM.lookup token (transitionNfaConsume (C.index transitions state)) : xs)
-      ([] :: [SU.Set Int])
-      (epsilonClosure transitions active)
-    ) (epsilonClosure transitions (SU.singleton 0)) tokens
-  )
-  finals
-
--- | This uses Hopcroft's Algorithm. It is like a smart constructor for Dfa.
-minimize :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> Dfa t
+-- | This uses Hopcroft's Algorithm. It is like a smart constructor for Dfsa.
+minimize :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> Dfsa t
 minimize t0 f0 =
   let partitions0 = go (S.fromList [f1,S.difference q0 f1]) (S.singleton f1)
       -- We move the partition containing the start start to the front.
       partitions1 = case L.find (S.member 0) partitions0 of
         Just startStates -> startStates : deletePredicate (\s -> S.member 0 s || S.null s) (S.toList partitions0)
-        Nothing -> error "Automata.Nfa.minimize: incorrect"
+        Nothing -> error "Automata.Nfsa.minimize: incorrect"
       -- Creates a map from old state to new state. This is not a bijection
       -- since two old states may map to the same new state. However, we
       -- may treat it as a bijection since at most one of the old states
@@ -212,23 +210,23 @@ minimize t0 f0 =
       assign !_ !m [] = m
       assign !ix !m (s : ss) = assign (ix + 1) (M.union (M.fromSet (const ix) s) m) ss
       assignments = assign 0 M.empty partitions1
-      newTransitions0 = E.fromList (map (\s -> DM.map (\oldState -> fromMaybe (error "Automata.Nfa.minimize: missing state") (M.lookup oldState assignments)) (PM.indexArray t1 (S.findMin s))) partitions1)
+      newTransitions0 = E.fromList (map (\s -> DM.map (\oldState -> fromMaybe (error "Automata.Nfsa.minimize: missing state") (M.lookup oldState assignments)) (PM.indexArray t1 (S.findMin s))) partitions1)
       canonization = establishOrder newTransitions0
       description = "[canonization=" ++ show canonization ++ "][assignments=" ++ show assignments ++ "]"
-      newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
+      newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfsa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
       newTransitions2 = runST $ do
-        marr <- C.replicateM (M.size canonization) (error ("Automata.Nfa.minimize: uninitialized element " ++ description))
-        flip C.itraverse_ newTransitions1 $ \ix dm -> C.write marr (fromMaybe (error ("Automata.Nfa.minimize: missing state while rearranging [state=" ++ show ix ++ "]" ++ description)) (M.lookup ix canonization)) dm
+        marr <- C.replicateM (M.size canonization) (error ("Automata.Nfsa.minimize: uninitialized element " ++ description))
+        flip C.itraverse_ newTransitions1 $ \ix dm -> C.write marr (fromMaybe (error ("Automata.Nfsa.minimize: missing state while rearranging [state=" ++ show ix ++ "]" ++ description)) (M.lookup ix canonization)) dm
         C.unsafeFreeze marr
       newAcceptingStates = foldMap (maybe SU.empty SU.singleton . (flip M.lookup canonization <=< flip M.lookup assignments)) f1
-   in Dfa newTransitions2 newAcceptingStates
+   in Dfsa newTransitions2 newAcceptingStates
   where
   q0 = S.fromList (enumFromTo 0 (C.size t1 - 1))
   f1 = S.fromList (mapMaybe (\x -> M.lookup x initialCanonization) (SU.toList f0))
   t1' :: Array (DM.Map t Int)
-  t1' = C.map' (DM.mapBijection (\s -> fromMaybe (error "Automata.Nfa.minimize: t1 prime") (M.lookup s initialCanonization))) t0
+  t1' = C.map' (DM.mapBijection (\s -> fromMaybe (error "Automata.Nfsa.minimize: t1 prime") (M.lookup s initialCanonization))) t0
   t1 = runST $ do
-    marr <- C.replicateM (M.size initialCanonization) (error "Automata.Nfa.minimize: t1 uninitialized element")
+    marr <- C.replicateM (M.size initialCanonization) (error "Automata.Nfsa.minimize: t1 uninitialized element")
     flip C.itraverse_ t1' $ \ix dm -> case M.lookup ix initialCanonization of
       Nothing -> return ()
       Just newIx -> C.write marr newIx dm
@@ -291,8 +289,8 @@ deletePredicate p (y:ys) = if p y then deletePredicate p ys else y : deletePredi
 
 -- | Accepts input that is accepted by both of the two argument DFAs. This is also known
 --   as completely synchronous composition in the literature.
-intersection :: (Ord t, Bounded t, Enum t) => Dfa t -> Dfa t -> Dfa t
-intersection (Dfa t1 f1) (Dfa t2 f2) = minimize
+intersection :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
+intersection (Dfsa t1 f1) (Dfsa t2 f2) = minimize
   (liftA2 (scoot n2) t1 t2)
   (SU.fromList (liftA2 (+) (map (* n2) (SU.toList f1)) (SU.toList f2)))
   where
@@ -306,8 +304,8 @@ scoot n2 d1 d2 = DM.unionWith (\s1 s2 -> n2 * s1 + s2) d1 d2
 
 -- | Accepts input that is accepted by either of the two argument DFAs. This is also known
 --   as synchronous composition in the literature.
-union :: (Ord t, Bounded t, Enum t) => Dfa t -> Dfa t -> Dfa t
-union (Dfa t1 f1) (Dfa t2 f2) = minimize
+union :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
+union (Dfsa t1 f1) (Dfsa t2 f2) = minimize
   (liftA2 (scoot n2) t1 t2)
   ( SU.fromList $
     (liftA2 (+) (map (* n2) (SU.toList f1)) (enumFromTo 0 (n2 - 1)))
@@ -315,22 +313,78 @@ union (Dfa t1 f1) (Dfa t2 f2) = minimize
     (liftA2 (+) (SU.toList f2) (map (* n2) (enumFromTo 0 (n1 - 1))))
   )
   where
-  !n2 = PM.sizeofArray t2
   !n1 = PM.sizeofArray t1
+  !n2 = PM.sizeofArray t2
+
+-- | Docs for this are at @Automata.Nfsa.union@.
+unionNfsa :: (Bounded t) => Nfsa t -> Nfsa t -> Nfsa t
+unionNfsa (Nfsa t1 f1) (Nfsa t2 f2) = Nfsa
+  ( runST $ do
+      m <- C.replicateM (n1 + n2 + 1)
+        ( TransitionNfsa
+          (mconcat
+            [ SU.mapMonotonic (+1) (transitionNfsaEpsilon (C.index t1 0))
+            , SU.mapMonotonic (\x -> 1 + n1) (transitionNfsaEpsilon (C.index t2 0))
+            , SU.tripleton 0 1 (1 + n1)
+            ]
+          )
+          (DM.pure SU.empty)
+        )
+      C.copy m 1 (fmap (translateTransitionNfsa 1) t1) 0 n1
+      C.copy m (1 + n1) (fmap (translateTransitionNfsa (1 + n1)) t2) 0 n2
+      C.unsafeFreeze m
+  )
+  (SU.mapMonotonic (+1) f1 <> SU.mapMonotonic (\x -> 1 + n1 + x) f2)
+  where
+  !n1 = PM.sizeofArray t1
+  !n2 = PM.sizeofArray t2
+
+translateTransitionNfsa :: Int -> TransitionNfsa t -> TransitionNfsa t
+translateTransitionNfsa n (TransitionNfsa eps m) = TransitionNfsa
+  (SU.mapMonotonic (+n) eps)
+  (DM.mapBijection (SU.mapMonotonic (+n)) m)
 
 -- | Automaton that accepts all input. This is the identity
 -- element for 'intersection'.
-acceptance :: Bounded t => Dfa t
-acceptance = Dfa (C.singleton (DM.pure 0)) (SU.singleton 0)
+acceptance :: Bounded t => Dfsa t
+acceptance = Dfsa (C.singleton (DM.pure 0)) (SU.singleton 0)
 
 -- | Automaton that rejects all input. This is the identity
 -- element for 'union'.
-rejection :: Bounded t => Dfa t
-rejection = Dfa (C.singleton (DM.pure 0)) SU.empty
+rejection :: Bounded t => Dfsa t
+rejection = Dfsa (C.singleton (DM.pure 0)) SU.empty
 
-instance (Ord t, Enum t, Bounded t) => Semiring (Dfa t) where
+-- | Automaton that accepts the empty string and rejects all
+-- other strings. This is the identity for 'append'.
+empty :: Bounded t => Nfsa t
+empty = Nfsa
+  ( C.doubleton
+    (TransitionNfsa (SU.singleton 0) (DM.pure (SU.singleton 1)))
+    (TransitionNfsa (SU.singleton 1) (DM.pure SU.empty))
+  )
+  (SU.singleton 0)
+
+-- | Docs for this are at @Automata.Nfsa.rejection@.
+rejectionNfsa :: Bounded t => Nfsa t
+rejectionNfsa = Nfsa
+  (C.singleton (TransitionNfsa (SU.singleton 0) (DM.pure SU.empty)))
+  SU.empty
+
+-- | This uses 'union' for @plus@ and 'intersection' for @times@.
+instance (Ord t, Enum t, Bounded t) => Semiring (Dfsa t) where
   plus = union
   times = intersection
   zero = rejection
   one = acceptance
+
+-- | This uses @union@ for @plus@ and @append@ for @times@.
+instance (Bounded t) => Semiring (Nfsa t) where
+  plus = unionNfsa
+  times = append
+  zero = rejectionNfsa
+  one = empty
+  
+data Epsilon = Epsilon !Int !Int
+
+newtype State s = State Int
 

@@ -2,8 +2,9 @@
 {-# language LambdaCase #-}
 {-# language ScopedTypeVariables #-}
 
-import Automata.Nfa (Nfa)
-import Automata.Dfa (Dfa)
+import Automata.Nfsa (Nfsa)
+import Automata.Nfst (Nfst)
+import Automata.Dfsa (Dfsa)
 import Test.Tasty (TestTree,defaultMain,testGroup,adjustOption)
 import Test.Tasty.HUnit (testCase)
 import Test.HUnit ((@?=))
@@ -12,10 +13,12 @@ import Test.QuickCheck (Arbitrary)
 import Data.Proxy (Proxy(..))
 import Control.Monad (forM_,replicateM)
 
-import qualified Automata.Nfa as Nfa
-import qualified Automata.Dfa as Dfa
-import qualified Automata.Nfa.Builder as B
-import qualified Automata.Dfa.Builder as DB
+import qualified Automata.Nfsa as Nfsa
+import qualified Automata.Nfst as Nfst
+import qualified Automata.Dfsa as Dfsa
+import qualified Automata.Nfsa.Builder as B
+import qualified Automata.Dfsa.Builder as DB
+import qualified Data.Set as S
 import qualified Data.List as L
 import qualified Test.Tasty.LeanCheck as TL
 import qualified Test.QuickCheck as QC
@@ -29,75 +32,93 @@ main = defaultMain
 
 tests :: TestTree
 tests = testGroup "Automata"
-  [ testGroup "Nfa"
+  [ testGroup "Nfsa"
     [ testGroup "evaluate"
-      [ testCase "A" (Nfa.evaluate ex1 [T3,T1] @?= False)
-      , testCase "B" (Nfa.evaluate ex1 [T0,T1,T3] @?= True)
-      , testCase "C" (Nfa.evaluate ex1 [T1,T3,T3] @?= True)
-      , testCase "D" (Nfa.evaluate ex1 [T0,T0,T0] @?= False)
-      , testCase "E" (Nfa.evaluate ex1 [T0,T0] @?= False)
-      , testCase "F" (Nfa.evaluate ex1 [T1] @?= True)
-      , testCase "G" (Nfa.evaluate ex1 [T1,T3] @?= True)
-      , testCase "H" (Nfa.evaluate ex2 [T3,T3,T0] @?= False)
-      , testCase "I" (Nfa.evaluate ex2 [T3,T3,T2] @?= True)
-      , testCase "J" (Nfa.evaluate ex3 [T1] @?= False)
-      , testCase "K" (Nfa.evaluate ex3 [T1,T3] @?= True)
-      , testCase "L" (Nfa.evaluate ex3 [T1,T3,T0] @?= False)
-      , testCase "M" (Nfa.evaluate ex3 [T1,T3,T0,T2,T3] @?= True)
-      , testCase "N" (Nfa.evaluate ex3 [T1,T3,T3] @?= True)
+      [ testCase "A" (Nfsa.evaluate ex1 [T3,T1] @?= False)
+      , testCase "B" (Nfsa.evaluate ex1 [T0,T1,T3] @?= True)
+      , testCase "C" (Nfsa.evaluate ex1 [T1,T3,T3] @?= True)
+      , testCase "D" (Nfsa.evaluate ex1 [T0,T0,T0] @?= False)
+      , testCase "E" (Nfsa.evaluate ex1 [T0,T0] @?= False)
+      , testCase "F" (Nfsa.evaluate ex1 [T1] @?= True)
+      , testCase "G" (Nfsa.evaluate ex1 [T1,T3] @?= True)
+      , testCase "H" (Nfsa.evaluate ex2 [T3,T3,T0] @?= False)
+      , testCase "I" (Nfsa.evaluate ex2 [T3,T3,T2] @?= True)
+      , testCase "J" (Nfsa.evaluate ex3 [T1] @?= False)
+      , testCase "K" (Nfsa.evaluate ex3 [T1,T3] @?= True)
+      , testCase "L" (Nfsa.evaluate ex3 [T1,T3,T0] @?= False)
+      , testCase "M" (Nfsa.evaluate ex3 [T1,T3,T0,T2,T3] @?= True)
+      , testCase "N" (Nfsa.evaluate ex3 [T1,T3,T3] @?= True)
       ]
     , testGroup "append"
-      [ testCase "A" (Nfa.evaluate (Nfa.append ex1 ex2) [T0,T1,T3,T3,T3,T2] @?= True)
-      , testCase "B" (Nfa.evaluate (Nfa.append ex1 ex2) [T0,T0,T3,T0] @?= False)
-      , testCase "C" (Nfa.evaluate (Nfa.append ex1 ex2) [T1,T3] @?= True)
-      , testCase "D" (Nfa.evaluate (Nfa.append ex2 ex3) [T3,T3,T2,T1,T3,T3] @?= True)
-      , testCase "E" (Nfa.evaluate (Nfa.append ex2 ex3) [T3,T3,T2] @?= False)
-      ]
-    , testGroup "toDfa"
-      [ testCase "A" (Dfa.evaluate (Nfa.toDfa ex1) [T0,T1,T3] @?= True)
-      , testCase "B" (Dfa.evaluate (Nfa.toDfa ex1) [T3,T1] @?= False)
-      , testCase "C" (Dfa.evaluate (Nfa.toDfa (Nfa.append ex1 ex2)) [T0,T1,T3,T3,T3,T2] @?= True)
-      , testCase "D" (Dfa.evaluate (Nfa.toDfa (Nfa.append ex2 ex3)) [T3,T3,T2,T1,T3,T3] @?= True)
-      , testCase "E" (Dfa.evaluate (Nfa.toDfa (Nfa.append ex1 ex2)) [T0,T0,T3,T0] @?= False)
-      , testCase "F" (Nfa.toDfa ex1 == Nfa.toDfa ex4 @?= True)
-      , testCase "G" (Nfa.toDfa ex1 == Nfa.toDfa ex2 @?= False)
-      , testCase "H" (Nfa.toDfa ex5 == Nfa.toDfa ex6 @?= True)
-      ]
-    ]
-  , testGroup "Dfa"
-    [ testGroup "evaluate"
-      [ testCase "A" (Dfa.evaluate exDfa1 [T1] @?= True)
-      , testCase "B" (Dfa.evaluate exDfa1 [T3,T2,T1,T2,T0] @?= True)
-      , testCase "C" (Dfa.evaluate exDfa1 [T3,T3] @?= False)
-      , testCase "D" (Dfa.evaluate exDfa2 [T1] @?= True)
-      , testCase "E" (Dfa.evaluate exDfa2 [T0,T2] @?= True)
+      [ testCase "A" (Nfsa.evaluate (Nfsa.append ex1 ex2) [T0,T1,T3,T3,T3,T2] @?= True)
+      , testCase "B" (Nfsa.evaluate (Nfsa.append ex1 ex2) [T0,T0,T3,T0] @?= False)
+      , testCase "C" (Nfsa.evaluate (Nfsa.append ex1 ex2) [T1,T3] @?= True)
+      , testCase "D" (Nfsa.evaluate (Nfsa.append ex2 ex3) [T3,T3,T2,T1,T3,T3] @?= True)
+      , testCase "E" (Nfsa.evaluate (Nfsa.append ex2 ex3) [T3,T3,T2] @?= False)
       ]
     , testGroup "union"
       [ testGroup "unit"
-        [ testCase "A" (Dfa.evaluate (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3)) [T0,T1,T3] @?= True)
-        , testCase "B" (Dfa.evaluate (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3)) [T2,T3] @?= True)
-        , testCase "C" (Dfa.evaluate (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3)) [T1,T3] @?= True)
-        , testCase "D" (Dfa.evaluate (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3)) [T1,T3,T0] @?= False)
-        , testCase "E" (Dfa.evaluate (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3)) [T1] @?= True)
-        , testCase "F" (Dfa.evaluate (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3)) [T3] @?= False)
-        , testCase "G" (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex3) @?= Dfa.union (Nfa.toDfa ex3) (Nfa.toDfa ex1))
-        , testCase "H" (Dfa.union (Nfa.toDfa ex1) (Nfa.toDfa ex1) @?= (Nfa.toDfa ex1))
-        , testCase "I" (Dfa.union (Nfa.toDfa ex3) (Nfa.toDfa ex3) @?= (Nfa.toDfa ex3))
+        [ testCase "A" (Nfsa.evaluate (Nfsa.union ex1 ex2) [T3,T1] @?= True)
+        , testCase "B" (Nfsa.evaluate (Nfsa.union ex1 ex2) [T3,T3,T2] @?= True)
+        , testCase "C" (Nfsa.evaluate (Nfsa.union ex1 ex2) [T0,T0,T0] @?= False)
         ]
-      , TL.testProperty "idempotent" $ \x -> let y = mkBinDfa x in y == Dfa.union y y
+      ]
+    , testGroup "toDfsa"
+      [ testCase "A" (Dfsa.evaluate (Nfsa.toDfsa ex1) [T0,T1,T3] @?= True)
+      , testCase "B" (Dfsa.evaluate (Nfsa.toDfsa ex1) [T3,T1] @?= False)
+      , testCase "C" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex1 ex2)) [T0,T1,T3,T3,T3,T2] @?= True)
+      , testCase "D" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex2 ex3)) [T3,T3,T2,T1,T3,T3] @?= True)
+      , testCase "E" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex1 ex2)) [T0,T0,T3,T0] @?= False)
+      , testCase "F" (Nfsa.toDfsa ex1 == Nfsa.toDfsa ex4 @?= True)
+      , testCase "G" (Nfsa.toDfsa ex1 == Nfsa.toDfsa ex2 @?= False)
+      , testCase "H" (Nfsa.toDfsa ex5 == Nfsa.toDfsa ex6 @?= True)
+      ]
+    , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Nfsa T)))
+    ]
+  , testGroup "Dfsa"
+    [ testGroup "evaluate"
+      [ testCase "A" (Dfsa.evaluate exDfsa1 [T1] @?= True)
+      , testCase "B" (Dfsa.evaluate exDfsa1 [T3,T2,T1,T2,T0] @?= True)
+      , testCase "C" (Dfsa.evaluate exDfsa2 [T3,T3] @?= False)
+      , testCase "D" (Dfsa.evaluate exDfsa2 [T1] @?= True)
+      , testCase "E" (Dfsa.evaluate exDfsa2 [T0,T2] @?= True)
+      ]
+    , testGroup "union"
+      [ testGroup "unit"
+        [ testCase "A" (Dfsa.evaluate (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3)) [T0,T1,T3] @?= True)
+        , testCase "B" (Dfsa.evaluate (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3)) [T2,T3] @?= True)
+        , testCase "C" (Dfsa.evaluate (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3)) [T1,T3] @?= True)
+        , testCase "D" (Dfsa.evaluate (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3)) [T1,T3,T0] @?= False)
+        , testCase "E" (Dfsa.evaluate (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3)) [T1] @?= True)
+        , testCase "F" (Dfsa.evaluate (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3)) [T3] @?= False)
+        , testCase "G" (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex3) @?= Dfsa.union (Nfsa.toDfsa ex3) (Nfsa.toDfsa ex1))
+        , testCase "H" (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex1) @?= (Nfsa.toDfsa ex1))
+        , testCase "I" (Dfsa.union (Nfsa.toDfsa ex3) (Nfsa.toDfsa ex3) @?= (Nfsa.toDfsa ex3))
+        ]
+      , TL.testProperty "idempotent" $ \x -> let y = mkBinDfsa x in y == Dfsa.union y y
       , testGroup "identity"
-        [ TL.testProperty "left" $ \x -> let y = mkBinDfa x in y == Dfa.union Dfa.rejection y
-        , TL.testProperty "right" $ \x -> let y = mkBinDfa x in y == Dfa.union y Dfa.rejection
+        [ TL.testProperty "left" $ \x -> let y = mkBinDfsa x in y == Dfsa.union Dfsa.rejection y
+        , TL.testProperty "right" $ \x -> let y = mkBinDfsa x in y == Dfsa.union y Dfsa.rejection
         ]
       ]
     , testGroup "intersection"
-      [ TL.testProperty "idempotent" $ \x -> let y = mkBinDfa x in y == Dfa.intersection y y
+      [ TL.testProperty "idempotent" $ \x -> let y = mkBinDfsa x in y == Dfsa.intersection y y
       , testGroup "identity"
-        [ TL.testProperty "left" $ \x -> let y = mkBinDfa x in y == Dfa.intersection Dfa.acceptance y
-        , TL.testProperty "right" $ \x -> let y = mkBinDfa x in y == Dfa.intersection y Dfa.acceptance
+        [ TL.testProperty "left" $ \x -> let y = mkBinDfsa x in y == Dfsa.intersection Dfsa.acceptance y
+        , TL.testProperty "right" $ \x -> let y = mkBinDfsa x in y == Dfsa.intersection y Dfsa.acceptance
         ]
       ]
-    , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Dfa T)))
+    , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Dfsa T)))
+    ]
+  , testGroup "Nfst"
+    [ testGroup "evaluate"
+      [ testCase "A" (Nfst.evaluate exNfst1 [T0,T1] @?= S.singleton [B1,B0])
+      , testCase "B" (Nfst.evaluate exNfst1 [T2,T1,T3] @?= S.singleton [B1,B1,B1])
+      , testCase "C" (Nfst.evaluate exNfst2 [T0,T0] @?= S.singleton [B0,B0])
+      , testCase "D" (Nfst.evaluate exNfst2 [T1,T0] @?= S.fromList [[B0,B0],[B0,B1]])
+      , testCase "E" (Nfst.evaluate exNfst3 [T0,T2] @?= S.singleton [B1,B0])
+      , testCase "F" (Nfst.evaluate exNfst3 [T0,T1] @?= S.singleton [B0,B1])
+      ]
     ]
   ]
 
@@ -109,6 +130,12 @@ data B = B0 | B1
 
 data T = T0 | T1 | T2 | T3
   deriving stock (Eq,Ord,Enum,Bounded,Show)
+
+instance Semigroup B where
+  (<>) = max
+
+instance Monoid B where
+  mempty = minBound
 
 instance Listable B where
   tiers = cons0 B0 \/ cons0 B1
@@ -122,23 +149,50 @@ instance Listable T where
 instance Arbitrary T where
   arbitrary = QC.arbitraryBoundedEnum
 
-instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Dfa t) where
+instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Dfsa t) where
   arbitrary = do
+    let states = 6
     n <- QC.choose (0,30)
     (ts :: [(Int,Int,t,t)]) <- QC.vectorOf n $ (,,,)
-      <$> QC.choose (0,6)
-      <*> QC.choose (0,6)
+      <$> QC.choose (0,states)
+      <*> QC.choose (0,states)
       <*> QC.arbitrary
       <*> QC.arbitrary
     return $ DB.run $ \s0 -> do
-      states <- fmap (s0:) (replicateM 6 DB.state)
+      states <- fmap (s0:) (replicateM states DB.state)
       DB.accept (states L.!! 3)
       forM_ ts $ \(source,dest,a,b) -> do
         let lo = min a b
             hi = max a b
         DB.transition lo hi (states L.!! source) (states L.!! dest)
 
-ex1 :: Nfa T
+instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Nfsa t) where
+  arbitrary = do
+    let states = 3
+    n <- QC.choose (0,20)
+    (ts :: [(Int,Int,t,t,Bool)]) <- QC.vectorOf n $ (,,,,)
+      <$> QC.choose (0,states)
+      <*> QC.choose (0,states)
+      <*> QC.arbitrary
+      <*> QC.arbitrary
+      <*> QC.frequency [(975,pure False),(25,pure True)]
+    return $ B.run $ \s0 -> do
+      states <- fmap (s0:) (replicateM states B.state)
+      B.accept (states L.!! 1)
+      forM_ ts $ \(source,dest,a,b,epsilon) -> do
+        let lo = min a b
+            hi = max a b
+        if epsilon
+          then B.epsilon (states L.!! source) (states L.!! dest)
+          else B.transition lo hi (states L.!! source) (states L.!! dest)
+
+-- This instance is provided for testing. The library does not provide
+-- an Eq instance for Nfsa since there is no efficent algorithm to do this
+-- in general.
+instance (Ord t, Bounded t, Enum t) => Eq (Nfsa t) where
+  a == b = Nfsa.toDfsa a == Nfsa.toDfsa b
+
+ex1 :: Nfsa T
 ex1 = B.run $ \s0 -> do
   s1 <- B.state
   B.accept s1
@@ -146,7 +200,7 @@ ex1 = B.run $ \s0 -> do
   B.transition T0 T0 s0 s0
   B.transition T3 T3 s1 s1
 
-ex2 :: Nfa T
+ex2 :: Nfsa T
 ex2 = B.run $ \s0 -> do
   s1 <- B.state
   B.accept s1
@@ -156,7 +210,7 @@ ex2 = B.run $ \s0 -> do
   B.transition T3 T3 s0 s1
   B.transition T3 T3 s1 s1
 
-ex3 :: Nfa T
+ex3 :: Nfsa T
 ex3 = B.run $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
@@ -167,7 +221,7 @@ ex3 = B.run $ \s0 -> do
   B.transition T0 T0 s2 s0
   B.epsilon s2 s1
 
-ex4 :: Nfa T
+ex4 :: Nfsa T
 ex4 = B.run $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
@@ -179,7 +233,7 @@ ex4 = B.run $ \s0 -> do
   B.transition T1 T2 s0 s2
   B.transition T3 T3 s2 s2
 
-ex5 :: Nfa T
+ex5 :: Nfsa T
 ex5 = B.run $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
@@ -188,7 +242,7 @@ ex5 = B.run $ \s0 -> do
   B.transition T1 T2 s1 s2
 
 -- Note: ex5 and ex6 accept the same inputs.
-ex6 :: Nfa T
+ex6 :: Nfsa T
 ex6 = B.run $ \s0 -> do
   -- s3, s4, and s5 are unreachable
   s3 <- B.state
@@ -204,14 +258,14 @@ ex6 = B.run $ \s0 -> do
   B.transition T2 T2 s5 s3
   B.transition T1 T2 s5 s3
 
-exDfa1 :: Dfa T
-exDfa1 = DB.run $ \s0 -> do
+exDfsa1 :: Dfsa T
+exDfsa1 = DB.run $ \s0 -> do
   s1 <- DB.state
   DB.accept s1
   DB.transition T0 T1 s0 s1
 
-exDfa2 :: Dfa T
-exDfa2 = DB.run $ \s0 -> do
+exDfsa2 :: Dfsa T
+exDfsa2 = DB.run $ \s0 -> do
   s1 <- DB.state
   s2 <- DB.state
   DB.accept s2
@@ -221,11 +275,47 @@ exDfa2 = DB.run $ \s0 -> do
   DB.transition T2 T2 s1 s2
   DB.transition T3 T3 s2 s2
 
+exNfst1 :: Nfst T B
+exNfst1 = Nfst.build $ \s0 -> do
+  s1 <- Nfst.state
+  Nfst.accept s1
+  Nfst.transition T0 T1 B0 s0 s1 
+  Nfst.transition T2 T3 B1 s0 s1 
+  Nfst.transition T0 T3 B1 s1 s1 
+
+exNfst2 :: Nfst T B
+exNfst2 = Nfst.build $ \s0 -> do
+  s1 <- Nfst.state
+  s2 <- Nfst.state
+  Nfst.epsilon s0 s1
+  Nfst.accept s2
+  Nfst.transition T0 T1 B0 s0 s1 
+  Nfst.transition T2 T3 B1 s0 s1 
+  Nfst.transition T0 T0 B0 s1 s2 
+  Nfst.transition T1 T3 B1 s1 s1
+  Nfst.transition T0 T0 B0 s2 s2
+  Nfst.transition T1 T3 B1 s2 s0
+
+exNfst3 :: Nfst T B
+exNfst3 = Nfst.build $ \s0 -> do
+  s1 <- Nfst.state
+  s2 <- Nfst.state
+  s3 <- Nfst.state
+  s4 <- Nfst.state
+  Nfst.accept s3
+  Nfst.accept s4
+  Nfst.transition T0 T0 B0 s0 s1
+  Nfst.transition T0 T0 B1 s0 s2
+  Nfst.transition T2 T2 B1 s1 s3
+  Nfst.transition T1 T1 B0 s2 s4
+  Nfst.transition T3 T3 B0 s1 s3
+  Nfst.transition T3 T3 B0 s2 s4
+
 -- This uses s3 as a dead state. So, we are roughly testing
 -- all DFA with three nodes, a binary transition function,
 -- and a single fixed end state.
-mkBinDfa :: ((T,T),(T,T),(T,T)) -> Dfa B
-mkBinDfa (ws,xs,ys) = DB.run $ \s0 -> do
+mkBinDfsa :: ((T,T),(T,T),(T,T)) -> Dfsa B
+mkBinDfsa (ws,xs,ys) = DB.run $ \s0 -> do
   s1 <- DB.state
   s2 <- DB.state
   s3 <- DB.state
@@ -242,4 +332,6 @@ mkBinDfa (ws,xs,ys) = DB.run $ \s0 -> do
   binTransitions xs s1
   binTransitions ys s2
   DB.transition B0 B1 s3 s3
+
+
 

@@ -3,7 +3,7 @@
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 
-module Automata.Dfa.Builder
+module Automata.Dfsa.Builder
   ( Builder
   , run
   , state
@@ -11,7 +11,7 @@ module Automata.Dfa.Builder
   , accept
   ) where
 
-import Automata.Internal (Dfa,minimize)
+import Automata.Internal (Dfsa,minimize)
 import Control.Monad.ST (runST)
 import Data.Foldable (for_)
 import Data.Primitive (Array)
@@ -45,7 +45,7 @@ newtype State s = State Int
 
 -- | The argument function takes a start state and builds an NFA. This
 -- function will execute the builder.
-run :: forall t a. (Bounded t, Ord t, Enum t) => (forall s. State s -> Builder t s a) -> Dfa t
+run :: forall t a. (Bounded t, Ord t, Enum t) => (forall s. State s -> Builder t s a) -> Dfsa t
 run fromStartState =
   case state >>= fromStartState of
     Builder f -> case f 0 [] [] of

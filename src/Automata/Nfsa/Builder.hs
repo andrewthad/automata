@@ -3,7 +3,7 @@
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 
-module Automata.Nfa.Builder
+module Automata.Nfsa.Builder
   ( Builder
   , run
   , state
@@ -12,7 +12,7 @@ module Automata.Nfa.Builder
   , epsilon
   ) where
 
-import Automata.Internal (Nfa(..),TransitionNfa(..))
+import Automata.Internal (Nfsa(..),TransitionNfsa(..),epsilonClosure)
 import Control.Monad.ST (runST)
 import Data.Foldable (for_)
 import Data.Primitive (Array)
@@ -39,21 +39,21 @@ data Result t a = Result !Int ![Edge t] ![Epsilon] ![Int] a
 
 data Edge t = Edge !Int !Int !t !t
 
-data EdgeDest t = EdgeDest !Int t t
+data EdgeDest t = EdgeDest !Int !t !t
 
 data Epsilon = Epsilon !Int !Int
 
 newtype State s = State Int
 
--- | The argument function takes a start state and builds an NFA. This
+-- | The argument function takes a start state and builds an NFSA. This
 -- function will execute the builder.
-run :: forall t a. (Bounded t, Ord t, Enum t) => (forall s. State s -> Builder t s a) -> Nfa t
+run :: forall t a. (Bounded t, Ord t, Enum t) => (forall s. State s -> Builder t s a) -> Nfsa t
 run fromStartState =
   case state >>= fromStartState of
     Builder f -> case f 0 [] [] [] of
       Result totalStates edges epsilons final _ ->
-        let ts = runST $ do
-              transitions <- C.replicateM totalStates (TransitionNfa SU.empty (DM.pure SU.empty))
+        let ts0 = runST $ do
+              transitions <- C.replicateM totalStates (TransitionNfsa SU.empty (DM.pure SU.empty))
               outbounds <- C.replicateM totalStates []
               epsilonArr <- C.replicateM totalStates []
               for_ epsilons $ \(Epsilon source destination) -> do
@@ -66,10 +66,10 @@ run fromStartState =
                 let !edgeDests1 = EdgeDest destination lo hi : edgeDests0
                 C.write outbounds source edgeDests1
               (outbounds' :: Array [EdgeDest t]) <- C.unsafeFreeze outbounds
-              flip C.imapMutable' transitions $ \i (TransitionNfa _ _) -> 
+              flip C.imapMutable' transitions $ \i (TransitionNfsa _ _) -> 
                 let dests = C.index outbounds' i
                     eps = C.index epsilonArr' i
-                 in TransitionNfa (SU.fromList eps)
+                 in TransitionNfsa (SU.fromList eps)
                       ( mconcat
                         ( map
                           (\(EdgeDest dest lo hi) -> DM.singleton SU.empty lo hi (SU.singleton dest))
@@ -77,7 +77,8 @@ run fromStartState =
                         )
                       )
               C.unsafeFreeze transitions
-         in Nfa ts (SU.fromList final)
+            ts1 = C.imap (\s (TransitionNfsa eps consume) -> TransitionNfsa (epsilonClosure ts0 (SU.singleton s <> eps)) (DM.map (epsilonClosure ts0) consume)) ts0
+         in Nfsa ts1 (SU.fromList final)
   
 -- | Generate a new state in the NFA. On any input, the
 --   state transitions to zero states.

@@ -5,21 +5,26 @@
 import Automata.Nfsa (Nfsa)
 import Automata.Nfst (Nfst)
 import Automata.Dfsa (Dfsa)
+import Automata.Dfst (Dfst)
 import Test.Tasty (TestTree,defaultMain,testGroup,adjustOption)
 import Test.Tasty.HUnit (testCase)
-import Test.HUnit ((@?=))
+import Test.HUnit ((@?=),assertBool)
 import Test.LeanCheck (Listable,(\/),cons0)
 import Test.QuickCheck (Arbitrary)
 import Data.Proxy (Proxy(..))
+import Data.Set (Set)
+import Data.Primitive (Array)
 import Control.Monad (forM_,replicateM)
+import Data.Monoid (All(..))
 
 import qualified Automata.Nfsa as Nfsa
 import qualified Automata.Nfst as Nfst
 import qualified Automata.Dfsa as Dfsa
+import qualified Automata.Dfst as Dfst
 import qualified Automata.Nfsa.Builder as B
-import qualified Automata.Dfsa.Builder as DB
 import qualified Data.Set as S
 import qualified Data.List as L
+import qualified GHC.Exts as E
 import qualified Test.Tasty.LeanCheck as TL
 import qualified Test.QuickCheck as QC
 import qualified Test.Tasty.QuickCheck as TQC
@@ -27,7 +32,7 @@ import qualified Test.QuickCheck.Classes as QCC
 
 main :: IO ()
 main = defaultMain
-  $ adjustOption (\_ -> TL.LeanCheckTests 70000)
+  $ adjustOption (\_ -> TL.LeanCheckTests 5000)
   $ tests 
 
 tests :: TestTree
@@ -64,16 +69,27 @@ tests = testGroup "Automata"
         ]
       ]
     , testGroup "toDfsa"
-      [ testCase "A" (Dfsa.evaluate (Nfsa.toDfsa ex1) [T0,T1,T3] @?= True)
-      , testCase "B" (Dfsa.evaluate (Nfsa.toDfsa ex1) [T3,T1] @?= False)
-      , testCase "C" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex1 ex2)) [T0,T1,T3,T3,T3,T2] @?= True)
-      , testCase "D" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex2 ex3)) [T3,T3,T2,T1,T3,T3] @?= True)
-      , testCase "E" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex1 ex2)) [T0,T0,T3,T0] @?= False)
-      , testCase "F" (Nfsa.toDfsa ex1 == Nfsa.toDfsa ex4 @?= True)
-      , testCase "G" (Nfsa.toDfsa ex1 == Nfsa.toDfsa ex2 @?= False)
-      , testCase "H" (Nfsa.toDfsa ex5 == Nfsa.toDfsa ex6 @?= True)
+      [ testGroup "unit"
+        [ testCase "A" (Dfsa.evaluate (Nfsa.toDfsa ex1) [T0,T1,T3] @?= True)
+        , testCase "B" (Dfsa.evaluate (Nfsa.toDfsa ex1) [T3,T1] @?= False)
+        , testCase "C" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex1 ex2)) [T0,T1,T3,T3,T3,T2] @?= True)
+        , testCase "D" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex2 ex3)) [T3,T3,T2,T1,T3,T3] @?= True)
+        , testCase "E" (Dfsa.evaluate (Nfsa.toDfsa (Nfsa.append ex1 ex2)) [T0,T0,T3,T0] @?= False)
+        , testCase "F" (Nfsa.toDfsa ex1 == Nfsa.toDfsa ex4 @?= True)
+        , testCase "G" (Nfsa.toDfsa ex1 == Nfsa.toDfsa ex2 @?= False)
+        , testCase "H" (Nfsa.toDfsa ex5 == Nfsa.toDfsa ex6 @?= True)
+        ]
+      , testGroup "evaluation"
+        [ TL.testProperty "1" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex1) [a,b,c,d] == Nfsa.evaluate ex1 [a,b,c,d]
+        , TL.testProperty "2" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex2) [a,b,c,d] == Nfsa.evaluate ex2 [a,b,c,d]
+        , TL.testProperty "3" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex3) [a,b,c,d] == Nfsa.evaluate ex3 [a,b,c,d]
+        , TL.testProperty "4" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex4) [a,b,c,d] == Nfsa.evaluate ex4 [a,b,c,d]
+        , TL.testProperty "5" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex5) [a,b,c,d] == Nfsa.evaluate ex5 [a,b,c,d]
+        , TL.testProperty "6" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex6) [a,b,c,d] == Nfsa.evaluate ex6 [a,b,c,d]
+        , TL.testProperty "7" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex7) [a,b,c,d] == Nfsa.evaluate ex7 [a,b,c,d]
+        ]
+      , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Nfsa T)))
       ]
-    , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Nfsa T)))
     ]
   , testGroup "Dfsa"
     [ testGroup "evaluate"
@@ -119,8 +135,35 @@ tests = testGroup "Automata"
       , testCase "E" (Nfst.evaluate exNfst3 [T0,T2] @?= S.singleton [B1,B0])
       , testCase "F" (Nfst.evaluate exNfst3 [T0,T1] @?= S.singleton [B0,B1])
       ]
+    , testGroup "toDfst"
+      [ testGroup "unit"
+        [ testCase "A" (let x = Dfst.evaluate (Nfst.toDfst exNfst4) [T0,T1] in assertBool (show x) (setSubresult [B1, B0] x))
+        , testCase "B" (let x = Dfst.evaluate (Nfst.toDfst exNfst5) [T1,T2] in assertBool (show x) (setSubresult [B0, B1] x))
+        ]
+      , testGroup "evaluation"
+        [ TL.testProperty "4" $ \(input :: [T]) -> getAll (foldMap (\x -> All (subresult (L.reverse x) (Dfst.evaluate (Nfst.toDfst exNfst4) input))) (Nfst.evaluate exNfst4 input))
+        , TL.testProperty "5" $ \(input :: [T]) -> getAll (foldMap (\x -> All (subresult (L.reverse x) (Dfst.evaluate (Nfst.toDfst exNfst5) input))) (Nfst.evaluate exNfst5 input))
+        , TL.testProperty "6" $ \(input :: [T]) -> getAll (foldMap (\x -> All (subresult (L.reverse x) (Dfst.evaluate (Nfst.toDfst exNfst6) input))) (Nfst.evaluate exNfst6 input))
+        ]
+      ]
+    ]
+  , testGroup "Dfst"
+    [ testGroup "evaluate"
+      [ testCase "A" (Dfst.evaluate exDfst1 [T0,T2] @?= Nothing)
+      , testCase "B" (Dfst.evaluate exDfst1 [T0,T1] @?= Just (E.fromList [B1,B0]))
+      ]
     ]
   ]
+
+subresult :: Ord a => [Set a] -> Maybe (Array (Set a)) -> Bool
+subresult xs = \case
+  Nothing -> False
+  Just ys -> length xs == length ys && all (uncurry S.isSubsetOf) (zip xs (E.toList ys))
+
+setSubresult :: Ord a => [a] -> Maybe (Array (Set a)) -> Bool
+setSubresult xs = \case
+  Nothing -> False
+  Just ys -> length xs == length ys && all (uncurry S.member) (zip xs (E.toList ys))
 
 lawsToTest :: QCC.Laws -> TestTree
 lawsToTest (QCC.Laws name pairs) = testGroup name (map (uncurry TQC.testProperty) pairs)
@@ -158,13 +201,13 @@ instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Dfsa t) where
       <*> QC.choose (0,states)
       <*> QC.arbitrary
       <*> QC.arbitrary
-    return $ DB.run $ \s0 -> do
-      states <- fmap (s0:) (replicateM states DB.state)
-      DB.accept (states L.!! 3)
+    return $ Dfsa.build $ \s0 -> do
+      states <- fmap (s0:) (replicateM states Dfsa.state)
+      Dfsa.accept (states L.!! 3)
       forM_ ts $ \(source,dest,a,b) -> do
         let lo = min a b
             hi = max a b
-        DB.transition lo hi (states L.!! source) (states L.!! dest)
+        Dfsa.transition lo hi (states L.!! source) (states L.!! dest)
 
 instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Nfsa t) where
   arbitrary = do
@@ -258,22 +301,43 @@ ex6 = B.run $ \s0 -> do
   B.transition T2 T2 s5 s3
   B.transition T1 T2 s5 s3
 
+ex7 :: Nfsa T
+ex7 = B.run $ \s0 -> do
+  s1 <- B.state
+  s2 <- B.state
+  s3 <- B.state
+  s4 <- B.state
+  s5 <- B.state
+  B.accept s3
+  B.accept s4
+  B.transition T0 T0 s0 s1
+  B.transition T0 T0 s0 s2
+  B.transition T2 T2 s1 s3
+  B.transition T0 T0 s1 s4
+  B.transition T1 T1 s2 s4
+  B.transition T3 T3 s1 s3
+  B.transition T3 T3 s2 s5
+  B.transition T2 T3 s4 s4
+  B.epsilon s4 s5
+  B.epsilon s5 s4
+
+
 exDfsa1 :: Dfsa T
-exDfsa1 = DB.run $ \s0 -> do
-  s1 <- DB.state
-  DB.accept s1
-  DB.transition T0 T1 s0 s1
+exDfsa1 = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  Dfsa.accept s1
+  Dfsa.transition T0 T1 s0 s1
 
 exDfsa2 :: Dfsa T
-exDfsa2 = DB.run $ \s0 -> do
-  s1 <- DB.state
-  s2 <- DB.state
-  DB.accept s2
-  DB.transition T0 T3 s0 s1
-  DB.transition T1 T2 s0 s2
-  DB.transition T2 T3 s1 s1
-  DB.transition T2 T2 s1 s2
-  DB.transition T3 T3 s2 s2
+exDfsa2 = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  s2 <- Dfsa.state
+  Dfsa.accept s2
+  Dfsa.transition T0 T3 s0 s1
+  Dfsa.transition T1 T2 s0 s2
+  Dfsa.transition T2 T3 s1 s1
+  Dfsa.transition T2 T2 s1 s2
+  Dfsa.transition T3 T3 s2 s2
 
 exNfst1 :: Nfst T B
 exNfst1 = Nfst.build $ \s0 -> do
@@ -311,27 +375,90 @@ exNfst3 = Nfst.build $ \s0 -> do
   Nfst.transition T3 T3 B0 s1 s3
   Nfst.transition T3 T3 B0 s2 s4
 
+exNfst4 :: Nfst T (Set B)
+exNfst4 = Nfst.build $ \s0 -> do
+  s1 <- Nfst.state
+  s2 <- Nfst.state
+  s3 <- Nfst.state
+  s4 <- Nfst.state
+  s5 <- Nfst.state
+  Nfst.accept s3
+  Nfst.accept s4
+  Nfst.transition T0 T0 (S.singleton B0) s0 s1
+  Nfst.transition T0 T0 (S.singleton B1) s0 s2
+  Nfst.transition T2 T2 (S.singleton B1) s1 s3
+  Nfst.transition T0 T0 (S.singleton B0) s1 s4
+  Nfst.transition T1 T1 (S.singleton B0) s2 s4
+  Nfst.transition T3 T3 (S.singleton B0) s1 s3
+  Nfst.transition T3 T3 (S.singleton B0) s2 s5
+  Nfst.transition T2 T3 (S.singleton B1) s4 s4
+  Nfst.epsilon s4 s5
+  Nfst.epsilon s5 s4
+
+exNfst5 :: Nfst T (Set B)
+exNfst5 = Nfst.build $ \s0 -> do
+  s1 <- Nfst.state
+  s2 <- Nfst.state
+  Nfst.accept s2
+  Nfst.transition T1 T1 (S.singleton B0) s0 s1
+  Nfst.transition T2 T2 (S.singleton B1) s1 s2
+
+exNfst6 :: Nfst T (Set B)
+exNfst6 = Nfst.build $ \s0 -> do
+  s1 <- Nfst.state
+  s2 <- Nfst.state
+  s3 <- Nfst.state
+  s4 <- Nfst.state
+  s5 <- Nfst.state
+  s6 <- Nfst.state
+  Nfst.epsilon s0 s4
+  Nfst.accept s2
+  Nfst.accept s6
+  Nfst.transition T1 T1 (S.singleton B1) s0 s1
+  Nfst.transition T3 T3 (S.singleton B0) s0 s4
+  Nfst.transition T2 T2 (S.singleton B1) s1 s2
+  Nfst.transition T3 T3 (S.singleton B0) s1 s4
+  Nfst.transition T2 T2 (S.singleton B1) s1 s2
+  Nfst.transition T0 T1 (S.singleton B0) s4 s6
+  Nfst.transition T1 T1 (S.singleton B1) s6 s4
+  Nfst.transition T0 T0 (S.singleton B0) s4 s1
+
+exDfst1 :: Dfst T B
+exDfst1 = Dfst.build $ \s0 -> do
+  s1 <- Dfst.state
+  s2 <- Dfst.state
+  s3 <- Dfst.state
+  s4 <- Dfst.state
+  Dfst.accept s3
+  Dfst.accept s4
+  Dfst.transition T0 T0 B0 s0 s1
+  Dfst.transition T0 T0 B1 s0 s2
+  Dfst.transition T2 T2 B1 s1 s3
+  Dfst.transition T1 T1 B0 s2 s4
+  Dfst.transition T3 T3 B0 s1 s3
+  Dfst.transition T3 T3 B0 s2 s4
+
 -- This uses s3 as a dead state. So, we are roughly testing
 -- all DFA with three nodes, a binary transition function,
 -- and a single fixed end state.
 mkBinDfsa :: ((T,T),(T,T),(T,T)) -> Dfsa B
-mkBinDfsa (ws,xs,ys) = DB.run $ \s0 -> do
-  s1 <- DB.state
-  s2 <- DB.state
-  s3 <- DB.state
-  DB.accept s1
+mkBinDfsa (ws,xs,ys) = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  s2 <- Dfsa.state
+  s3 <- Dfsa.state
+  Dfsa.accept s1
   let resolve = \case
         T0 -> s0
         T1 -> s1
         T2 -> s2
         T3 -> s3
       binTransitions (a,b) s = do
-        DB.transition B0 B0 s (resolve a)
-        DB.transition B1 B1 s (resolve b)
+        Dfsa.transition B0 B0 s (resolve a)
+        Dfsa.transition B1 B1 s (resolve b)
   binTransitions ws s0
   binTransitions xs s1
   binTransitions ys s2
-  DB.transition B0 B1 s3 s3
+  Dfsa.transition B0 B1 s3 s3
 
 
 

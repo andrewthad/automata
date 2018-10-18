@@ -14,6 +14,7 @@ module Automata.Internal
   , Epsilon(..)
     -- * NFA Functions 
   , toDfsa
+  , toDfsaMapping
   , append
   , empty
   , rejectionNfsa
@@ -37,6 +38,8 @@ import Data.Primitive (Array,indexArray)
 import Data.Semigroup (First(..))
 import Data.Semiring (Semiring)
 import Data.Set (Set)
+
+import Debug.Trace
 
 import qualified Data.List as L
 import qualified Data.Set as S
@@ -99,6 +102,7 @@ data Conversion = Conversion
     -- The state identifier to be assigned to the next state.
   , conversionResolutions :: !(Map (SU.Set Int) Int)
     -- The map from subsets of states to new state identifiers.
+    -- This is a bidirectional map.
   , conversionTraversed :: !(Set Int)
     -- The new state identifiers that have already been dealt with.
     -- This must be a subset of the keys of resolutions.
@@ -106,6 +110,9 @@ data Conversion = Conversion
     -- Newly created states that we need to consider transitions for.
     -- The keys in this should all be less than the label.
   }
+
+debugTrace :: Show a => a -> a
+debugTrace = id
 
 append :: Nfsa t -> Nfsa t -> Nfsa t
 append (Nfsa t1 f1) (Nfsa t2 f2) = 
@@ -158,7 +165,6 @@ resolveSubset transitions s0 = do
       return ident
     Just ident -> return ident
   
-
 epsilonClosure :: Array (TransitionNfsa t) -> SU.Set Int -> SU.Set Int
 epsilonClosure s states = go states SU.empty where
   go new old = if new == old
@@ -171,16 +177,26 @@ data Node t = Node
   !Int -- identifier
   !(DM.Map t Int) -- transitions
 
-toDfsa :: forall t. (Ord t, Bounded t, Enum t) => Nfsa t -> Dfsa t
-toDfsa (Nfsa t0 f0) = runST $ do
+-- | Convert an NFSA to a DFSA. For certain inputs, this causes
+--   the number of states to blow up expontentially, so do not
+--   call this on untrusted input.
+toDfsa :: (Ord t, Bounded t, Enum t) => Nfsa t -> Dfsa t
+toDfsa = snd . toDfsaMapping
+
+toDfsaMapping :: forall t. (Ord t, Bounded t, Enum t) => Nfsa t -> (Map (SU.Set Int) Int, Dfsa t)
+toDfsaMapping (Nfsa t0 f0) = runST $ do
   let ((len,nodes),c) = State.runState
         (go 0 [])
         (Conversion 1 (M.singleton startClosure 0) S.empty (M.singleton 0 startClosure))
+      resolutions = debugTrace $ conversionResolutions c
   marr <- C.new len
   forM_ nodes $ \(Node ident transitions) -> C.write marr ident transitions
   arr <- C.unsafeFreeze marr
-  let f1 = SU.fromList (M.foldrWithKey (\k v xs -> if SU.null (SU.intersection k f0) then xs else v : xs) [] (conversionResolutions c))
-  return (minimize arr f1)
+  let f1 = SU.fromList (M.foldrWithKey (\k v xs -> if SU.null (SU.intersection k f0) then xs else v : xs) [] resolutions)
+  let (canonB,r) = minimizeMapping arr f1
+      canonC = debugTrace canonB
+      canon = fmap (fromMaybe (error "toDfsaMapping: missing canon value") . flip M.lookup canonC) resolutions
+  return (canon,r)
   where
   startClosure :: SU.Set Int
   startClosure = epsilonClosure t0 (SU.singleton 0)
@@ -195,11 +211,17 @@ toDfsa (Nfsa t0 f0) = runST $ do
         go (n + 1) (Node m t : edges0)
 
 -- | This uses Hopcroft's Algorithm. It is like a smart constructor for Dfsa.
-minimize :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> Dfsa t
-minimize t0 f0 =
+minimize :: (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> Dfsa t
+minimize t0 f0 = snd (minimizeMapping t0 f0)
+
+-- | This uses Hopcroft's Algorithm. It also provides the mapping from old
+--   state number to new state number. We need this mapping for a special
+--   NFST to DFST minimizer.
+minimizeMapping :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> (Map Int Int, Dfsa t)
+minimizeMapping t0 f0 =
   let partitions0 = go (S.fromList [f1,S.difference q0 f1]) (S.singleton f1)
-      -- We move the partition containing the start start to the front.
-      partitions1 = case L.find (S.member 0) partitions0 of
+      -- We move the partition containing the start state to the front.
+      partitions1 = debugTrace $ case L.find (S.member 0) partitions0 of
         Just startStates -> startStates : deletePredicate (\s -> S.member 0 s || S.null s) (S.toList partitions0)
         Nothing -> error "Automata.Nfsa.minimize: incorrect"
       -- Creates a map from old state to new state. This is not a bijection
@@ -211,7 +233,7 @@ minimize t0 f0 =
       assign !ix !m (s : ss) = assign (ix + 1) (M.union (M.fromSet (const ix) s) m) ss
       assignments = assign 0 M.empty partitions1
       newTransitions0 = E.fromList (map (\s -> DM.map (\oldState -> fromMaybe (error "Automata.Nfsa.minimize: missing state") (M.lookup oldState assignments)) (PM.indexArray t1 (S.findMin s))) partitions1)
-      canonization = establishOrder newTransitions0
+      canonization = debugTrace $ establishOrder newTransitions0
       description = "[canonization=" ++ show canonization ++ "][assignments=" ++ show assignments ++ "]"
       newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfsa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
       newTransitions2 = runST $ do
@@ -219,10 +241,12 @@ minimize t0 f0 =
         flip C.itraverse_ newTransitions1 $ \ix dm -> C.write marr (fromMaybe (error ("Automata.Nfsa.minimize: missing state while rearranging [state=" ++ show ix ++ "]" ++ description)) (M.lookup ix canonization)) dm
         C.unsafeFreeze marr
       newAcceptingStates = foldMap (maybe SU.empty SU.singleton . (flip M.lookup canonization <=< flip M.lookup assignments)) f1
-   in Dfsa newTransitions2 newAcceptingStates
+      finalCanonization = fmap (fromMaybe (error ("minimizeMapping: failed to connect the canons.\npartitions:\n" ++ show partitions1 ++ "\ninitial canon:\n" ++ show initialCanonization ++ "\nsecond canon:\n" ++ show canonization)) . (flip M.lookup canonization <=< flip M.lookup assignments)) initialCanonization
+   in (finalCanonization,Dfsa newTransitions2 newAcceptingStates)
   where
   q0 = S.fromList (enumFromTo 0 (C.size t1 - 1))
   f1 = S.fromList (mapMaybe (\x -> M.lookup x initialCanonization) (SU.toList f0))
+  -- Do we actually need to canonize the states twice? Yes, we do.
   t1' :: Array (DM.Map t Int)
   t1' = C.map' (DM.mapBijection (\s -> fromMaybe (error "Automata.Nfsa.minimize: t1 prime") (M.lookup s initialCanonization))) t0
   t1 = runST $ do

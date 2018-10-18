@@ -34,7 +34,7 @@ library
     , primitive-checked >= 0.6.4
     , primitive-containers >= 0.3
     , containers
-    , contiguous-checked
+    , contiguous
     , semirings >= 0.2.1.1
     , transformers
   ghc-options: -O2

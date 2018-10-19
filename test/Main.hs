@@ -134,6 +134,9 @@ tests = testGroup "Automata"
       , testCase "D" (Nfst.evaluate exNfst2 [T1,T0] @?= S.fromList [[B0,B0],[B0,B1]])
       , testCase "E" (Nfst.evaluate exNfst3 [T0,T2] @?= S.singleton [B1,B0])
       , testCase "F" (Nfst.evaluate exNfst3 [T0,T1] @?= S.singleton [B0,B1])
+      , testCase "G" (Nfst.evaluate (Nfst.union Nfst.rejection exNfst3) [T0,T1] @?= S.singleton [B0,B1])
+      , testCase "H" (Nfst.evaluate (Nfst.union exNfst1 exNfst3) [T0,T1] @?= S.fromList [[B1,B0],[B0,B1]])
+      , testCase "I" (Nfst.evaluate (Nfst.union exNfst3 exNfst1) [T0,T1] @?= S.fromList [[B1,B0],[B0,B1]])
       ]
     , testGroup "toDfst"
       [ testGroup "unit"

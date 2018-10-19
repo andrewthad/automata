@@ -13,8 +13,11 @@ module Automata.Nfst
     Nfst
     -- ** Functions
   , evaluate
+  , union
   , toDfst
   , toNfsa
+    -- ** Special Transducers
+  , rejection
     -- * Builder
     -- ** Types
   , Builder
@@ -28,7 +31,7 @@ module Automata.Nfst
   ) where
 
 import Automata.Internal (State(..),Epsilon(..),Nfsa(..),Dfsa(..),TransitionNfsa(..),toDfsaMapping)
-import Automata.Internal.Transducer (Nfst(..),Dfst(..),TransitionNfst(..),MotionDfst(..),Edge(..),EdgeDest(..),epsilonClosure)
+import Automata.Internal.Transducer (Nfst(..),Dfst(..),TransitionNfst(..),MotionDfst(..),Edge(..),EdgeDest(..),epsilonClosure,rejection,union)
 import Control.Monad.ST (runST)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Any(..))

@@ -14,6 +14,8 @@ module Automata.Dfst
   , evaluate
   , union
   , map
+    -- ** Special Transducers
+  , rejection
     -- * Builder
     -- ** Types
   , Builder
@@ -51,6 +53,10 @@ map f (Dfst t m) =
   -- Revisit this implementation if we ever start supporting the canonization
   -- and minimization of DFST.
   Dfst (fmap (DM.map (\(MotionDfst s x) -> MotionDfst s (f x))) t) m
+
+-- | Rejects all input, producing the monoidal identity as its output.
+rejection :: (Bounded t, Monoid m) => Dfst t m
+rejection = Dfst (C.singleton (DM.pure (MotionDfst 0 mempty))) SU.empty
 
 union :: forall t m. (Ord t, Bounded t, Enum t, Monoid m) => Dfst t m -> Dfst t m -> Dfst t m
 union a@(Dfst ax _) b@(Dfst bx _) =

@@ -12,6 +12,7 @@ module Automata.Dfst
     Dfst
     -- ** Functions
   , evaluate
+  , evaluateAscii
   , union
   , map
     -- ** Special Transducers
@@ -33,17 +34,19 @@ import Automata.Internal (State(..),Dfsa(..),composeMapping)
 import Automata.Internal.Transducer (Dfst(..),MotionDfst(..),Edge(..),EdgeDest(..))
 import Control.Monad.ST (runST)
 import Data.Foldable (foldl',for_)
+import Data.Map.Strict (Map)
+import Data.Maybe (fromMaybe)
 import Data.Primitive (Array,indexArray)
 import Data.Semigroup (Last(..))
-import Data.Map.Strict (Map)
 import Data.Set (Set)
-import Data.Maybe (fromMaybe)
+import Data.ByteString (ByteString)
 
+import qualified Data.ByteString.Char8 as BC
 import qualified Data.List as L
-import qualified Data.Set as S
+import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Strict as M
 import qualified Data.Primitive.Contiguous as C
-import qualified Data.Map.Interval.DBTSLL as DM
+import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
 import qualified GHC.Exts as E
 
@@ -94,6 +97,17 @@ evaluate (Dfst transitions finals) tokens =
         ) (0,0,[]) tokens
    in if SU.member finalState finals
         then Just (C.unsafeFromListReverseN totalSize allOutput)
+        else Nothing
+
+evaluateAscii :: forall m. Ord m => Dfst Char m -> ByteString -> Maybe (Array m)
+evaluateAscii (Dfst transitions finals) !tokens =
+  let !(!finalState,!allOutput) = BC.foldl'
+        (\(!active,!output) token ->
+          let MotionDfst nextState outputToken = DM.lookup token (indexArray transitions active)
+           in (nextState,outputToken : output)
+        ) (0,[]) tokens
+   in if SU.member finalState finals
+        then Just (C.unsafeFromListReverseN (BC.length tokens) allOutput)
         else Nothing
 
 newtype Builder t m s a = Builder (Int -> [Edge t m] -> [Int] -> Result t m a)

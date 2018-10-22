@@ -155,6 +155,12 @@ tests = testGroup "Automata"
       [ testCase "A" (Dfst.evaluate exDfst1 [T0,T2] @?= Nothing)
       , testCase "B" (Dfst.evaluate exDfst1 [T0,T1] @?= Just (E.fromList [B1,B0]))
       ]
+    , testGroup "union"
+      [ testGroup "unit"
+        [ testCase "A" (let x = Dfst.evaluate (Dfst.union (Dfst.map S.singleton exDfst1) (Dfst.map S.singleton exDfst2)) [T0,T1] in assertBool (show x) (setSubresult [B0, B1] x))
+        , testCase "B" (let x = Dfst.evaluate (Dfst.union (Dfst.map S.singleton exDfst1) (Dfst.map S.singleton exDfst2)) [T0,T3] in assertBool (show x) (setSubresult [B0, B0] x))
+        ]
+      ]
     ]
   ]
 
@@ -440,6 +446,15 @@ exDfst1 = Dfst.build $ \s0 -> do
   Dfst.transition T1 T1 B0 s2 s4
   Dfst.transition T3 T3 B0 s1 s3
   Dfst.transition T3 T3 B0 s2 s4
+
+exDfst2 :: Dfst T B
+exDfst2 = Dfst.build $ \s0 -> do
+  s1 <- Dfst.state
+  s2 <- Dfst.state
+  Dfst.accept s2
+  Dfst.transition T0 T0 B0 s0 s1
+  Dfst.transition T1 T1 B1 s1 s2
+  Dfst.transition T2 T2 B0 s2 s0
 
 -- This uses s3 as a dead state. So, we are roughly testing
 -- all DFA with three nodes, a binary transition function,

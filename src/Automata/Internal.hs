@@ -26,6 +26,8 @@ module Automata.Internal
   , acceptance
   , rejection
   , minimize
+  , minimizeMapping
+  , composeMapping
   ) where
 
 import Control.Applicative (liftA2)
@@ -109,6 +111,12 @@ data Conversion = Conversion
   , conversionPending :: !(Map Int (SU.Set Int))
     -- Newly created states that we need to consider transitions for.
     -- The keys in this should all be less than the label.
+  }
+
+data Pairing = Pairing
+  { pairingMap :: !(Map (Int,Int) Int)
+  , pairingReversedOld :: ![(Int,Int)]
+  , pairingState :: !Int
   }
 
 debugTrace :: Show a => a -> a
@@ -314,11 +322,7 @@ deletePredicate p (y:ys) = if p y then deletePredicate p ys else y : deletePredi
 -- | Accepts input that is accepted by both of the two argument DFAs. This is also known
 --   as completely synchronous composition in the literature.
 intersection :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
-intersection (Dfsa t1 f1) (Dfsa t2 f2) = minimize
-  (liftA2 (scoot n2) t1 t2)
-  (SU.fromList (liftA2 (+) (map (* n2) (SU.toList f1)) (SU.toList f2)))
-  where
-  !n2 = PM.sizeofArray t2
+intersection = compose (&&)
 
 -- Adjusts all the values in the first interval map by multiplying
 -- them by the number of states in the second automaton. Then,
@@ -326,19 +330,45 @@ intersection (Dfsa t1 f1) (Dfsa t2 f2) = minimize
 scoot :: Ord t => Int -> DM.Map t Int -> DM.Map t Int -> DM.Map t Int
 scoot n2 d1 d2 = DM.unionWith (\s1 s2 -> n2 * s1 + s2) d1 d2
 
+{-# NOINLINE errorThunkUnion #-}
+errorThunkUnion :: a
+errorThunkUnion = error "Automata.Dfsa.union: slot not filled"
+
 -- | Accepts input that is accepted by either of the two argument DFAs. This is also known
 --   as synchronous composition in the literature.
 union :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
-union (Dfsa t1 f1) (Dfsa t2 f2) = minimize
-  (liftA2 (scoot n2) t1 t2)
-  ( SU.fromList $
-    (liftA2 (+) (map (* n2) (SU.toList f1)) (enumFromTo 0 (n2 - 1)))
-    <>
-    (liftA2 (+) (SU.toList f2) (map (* n2) (enumFromTo 0 (n1 - 1))))
-  )
-  where
-  !n1 = PM.sizeofArray t1
-  !n2 = PM.sizeofArray t2
+union = compose (||)
+
+composeMapping :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> (Map (Int,Int) Int, Dfsa t)
+composeMapping combineFinalMembership (Dfsa t1 f1) (Dfsa t2 f2) = runST $ do
+  let Pairing oldToNew reversedOld n3 = compositionReachable t1 t2
+  m <- PM.newArray n3 errorThunkUnion
+  let go !_ [] = return ()
+      go !ix (statePair@(stateA,stateB) : xs) = do
+        PM.writeArray m ix (DM.unionWith (\x y -> fromMaybe (error "Automata.Dfsa.union: could not find pair in oldToNew") (M.lookup (x,y) oldToNew)) (PM.indexArray t1 stateA) (PM.indexArray t2 stateB))
+        go (ix - 1) xs
+  go (n3 - 1) reversedOld
+  frozen <- PM.unsafeFreezeArray m
+  let finals = SU.fromList (M.foldrWithKey (\(stateA,stateB) stateNew xs -> if combineFinalMembership (SU.member stateA f1) (SU.member stateB f2) then stateNew : xs else xs) [] oldToNew)
+  let (secondMapping, r) = minimizeMapping frozen finals
+  return (M.map (\x -> fromMaybe (error "composeMapping: bad lookup") (M.lookup x secondMapping)) oldToNew, r)
+
+compose :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> Dfsa t
+compose combineFinalMembership a b = snd (composeMapping combineFinalMembership a b)
+
+compositionReachable :: Ord t => Array (DM.Map t Int) -> Array (DM.Map t Int) -> Pairing
+compositionReachable a b = State.execState (go 0 0) (Pairing M.empty [] 0) where
+  !szA = PM.sizeofArray a
+  !szB = PM.sizeofArray b
+  go :: Int -> Int -> State.State Pairing ()
+  go !stateA !stateB = do
+    Pairing m xs s <- State.get
+    case M.lookup (stateA,stateB) m of
+      Just _ -> return ()
+      Nothing -> do
+        State.put (Pairing (M.insert (stateA,stateB) s m) ((stateA,stateB) : xs) (s + 1))
+        DM.traverse_ (uncurry go) (DM.unionWith (,) (PM.indexArray a stateA) (PM.indexArray b stateB))
+    
 
 -- | Docs for this are at @Automata.Nfsa.union@.
 unionNfsa :: (Bounded t) => Nfsa t -> Nfsa t -> Nfsa t

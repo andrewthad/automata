@@ -12,6 +12,8 @@ module Automata.Dfst
     Dfst
     -- ** Functions
   , evaluate
+  , union
+  , map
     -- * Builder
     -- ** Types
   , Builder
@@ -23,16 +25,56 @@ module Automata.Dfst
   , accept
   ) where
 
-import Automata.Internal (State(..))
+import Prelude hiding (map)
+
+import Automata.Internal (State(..),Dfsa(..),composeMapping)
 import Automata.Internal.Transducer (Dfst(..),MotionDfst(..),Edge(..),EdgeDest(..))
 import Control.Monad.ST (runST)
 import Data.Foldable (foldl',for_)
 import Data.Primitive (Array,indexArray)
 import Data.Semigroup (Last(..))
+import Data.Map.Strict (Map)
+import Data.Set (Set)
+import Data.Maybe (fromMaybe)
 
+import qualified Data.List as L
+import qualified Data.Set as S
+import qualified Data.Map.Strict as M
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Set.Unboxed as SU
+import qualified GHC.Exts as E
+
+-- | Map over the output tokens.
+map :: Eq n => (m -> n) -> Dfst t m -> Dfst t n
+map f (Dfst t m) =
+  -- Revisit this implementation if we ever start supporting the canonization
+  -- and minimization of DFST.
+  Dfst (fmap (DM.map (\(MotionDfst s x) -> MotionDfst s (f x))) t) m
+
+union :: forall t m. (Ord t, Bounded t, Enum t, Monoid m) => Dfst t m -> Dfst t m -> Dfst t m
+union a@(Dfst ax _) b@(Dfst bx _) =
+  let (mapping, Dfsa t0 f) = composeMapping (||) (unsafeToDfsa a) (unsafeToDfsa b)
+      -- The revMapping goes from a new state to all a-b old state pairs.
+      revMapping :: Map Int (Set (Int,Int))
+      revMapping = M.foldlWithKey' (\acc k v -> M.insertWith (<>) v (S.singleton k) acc) M.empty mapping
+      t1 :: Array (DM.Map t (MotionDfst m))
+      t1 = C.imap
+        (\source m -> DM.mapBijection
+          (\dest ->
+            let oldSources = fromMaybe (error "Automata.Nfst.toDfst: missing old source") (M.lookup source revMapping)
+                oldDests = fromMaybe (error "Automata.Nfst.toDfst: missing old dest") (M.lookup dest revMapping)
+                -- Do we need to deal with epsilon stuff in here? I don't think so.
+                newOutput = foldMap
+                  (\(oldSourceA,oldSourceB) -> mconcat $ E.toList $ do
+                    MotionDfst oldDestA outA <- DM.elems (indexArray ax oldSourceA)
+                    MotionDfst oldDestB outB <- DM.elems (indexArray bx oldSourceB)
+                    if S.member (oldDestA,oldDestB) oldDests then pure (outA <> outB) else mempty
+                  ) oldSources
+             in MotionDfst dest newOutput
+          ) m
+        ) t0
+   in Dfst t1 f
 
 -- | Returns @Nothing@ if the transducer did not end up in an
 --   accepting state. Returns @Just@ if it did. The array of
@@ -106,7 +148,7 @@ build fromStartState =
               flip C.imapMutable' transitions $ \i _ -> 
                 let dests = C.index outbounds' i
                  in mconcat
-                      ( map
+                      ( L.map
                         (\(EdgeDest dest lo hi output) ->
                           DM.singleton mempty lo hi (Just (Last (MotionDfst dest output)))
                         )
@@ -114,4 +156,15 @@ build fromStartState =
                       )
               C.unsafeFreeze transitions
          in Dfst (fmap (DM.map (maybe (MotionDfst 0 mempty) getLast)) ts0) (SU.fromList final)
+
+-- collapse :: Dfst t m -> Dfst t m
+-- collapse = MotionDfst 
+
+-- Convert a DFST to a DFSA. However, the DFSA is not necessarily minimal, so
+-- equality on it is incorrect. Its states have a one-to-one mapping with the
+-- states on the DFST.
+unsafeToDfsa :: Dfst t m -> Dfsa t
+unsafeToDfsa (Dfst t f) = Dfsa (fmap (DM.map motionDfstState) t) f
+
+
 

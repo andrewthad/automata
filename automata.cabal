@@ -53,9 +53,12 @@ test-suite test
     , automata
     , base >=4.7 && <5
     , containers
+    , enum-types >= 0.1
     , leancheck
+    , leancheck-enum-instances >= 0.1
     , primitive
     , quickcheck-classes
+    , quickcheck-enum-instances >= 0.1
     , tasty
     , tasty-hunit
     , tasty-leancheck

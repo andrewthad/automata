@@ -1,3 +1,5 @@
+{-# language BangPatterns #-}
+
 module Automata.Internal.Transducer
   ( Nfst(..)
   , TransitionNfst(..)

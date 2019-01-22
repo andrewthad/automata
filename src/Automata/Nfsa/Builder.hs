@@ -1,3 +1,4 @@
+{-# language BangPatterns #-}
 {-# language DeriveFunctor #-}
 {-# language DerivingStrategies #-}
 {-# language RankNTypes #-}

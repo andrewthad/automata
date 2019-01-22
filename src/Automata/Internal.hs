@@ -56,6 +56,8 @@ import qualified Data.Map.Lifted.Lifted as MLL
 import qualified GHC.Exts as E
 import qualified Data.Semiring
 
+-- | Deterministic Finite State Automaton.
+--
 -- The start state is always zero.
 data Dfsa t = Dfsa
   { dfaTransition :: !(Array (DM.Map t Int))
@@ -67,7 +69,9 @@ data Dfsa t = Dfsa
     --   considered to have been accepted by the grammar.
   } deriving (Eq,Show)
 
--- NFA representation decisions:
+-- | Non-Deterministic Finite State Automaton.
+--
+-- Some notes on the implementation and design:
 --
 -- * You can transition to any non-negative number of states (including 0).
 -- * There is only one start state.
@@ -118,9 +122,6 @@ data Pairing = Pairing
   , pairingReversedOld :: ![(Int,Int)]
   , pairingState :: !Int
   }
-
-debugTrace :: Show a => a -> a
-debugTrace = id
 
 append :: Nfsa t -> Nfsa t -> Nfsa t
 append (Nfsa t1 f1) (Nfsa t2 f2) = 
@@ -196,14 +197,13 @@ toDfsaMapping (Nfsa t0 f0) = runST $ do
   let ((len,nodes),c) = State.runState
         (go 0 [])
         (Conversion 1 (M.singleton startClosure 0) S.empty (M.singleton 0 startClosure))
-      resolutions = debugTrace $ conversionResolutions c
+      resolutions = conversionResolutions c
   marr <- C.new len
   forM_ nodes $ \(Node ident transitions) -> C.write marr ident transitions
   arr <- C.unsafeFreeze marr
   let f1 = SU.fromList (M.foldrWithKey (\k v xs -> if SU.null (SU.intersection k f0) then xs else v : xs) [] resolutions)
   let (canonB,r) = minimizeMapping arr f1
-      canonC = debugTrace canonB
-      canon = fmap (fromMaybe (error "toDfsaMapping: missing canon value") . flip M.lookup canonC) resolutions
+      canon = fmap (fromMaybe (error "toDfsaMapping: missing canon value") . flip M.lookup canonB) resolutions
   return (canon,r)
   where
   startClosure :: SU.Set Int
@@ -229,7 +229,7 @@ minimizeMapping :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) 
 minimizeMapping t0 f0 =
   let partitions0 = go (S.fromList [f1,S.difference q0 f1]) (S.singleton f1)
       -- We move the partition containing the start state to the front.
-      partitions1 = debugTrace $ case L.find (S.member 0) partitions0 of
+      partitions1 = case L.find (S.member 0) partitions0 of
         Just startStates -> startStates : deletePredicate (\s -> S.member 0 s || S.null s) (S.toList partitions0)
         Nothing -> error "Automata.Nfsa.minimize: incorrect"
       -- Creates a map from old state to new state. This is not a bijection
@@ -241,7 +241,7 @@ minimizeMapping t0 f0 =
       assign !ix !m (s : ss) = assign (ix + 1) (M.union (M.fromSet (const ix) s) m) ss
       assignments = assign 0 M.empty partitions1
       newTransitions0 = E.fromList (map (\s -> DM.map (\oldState -> fromMaybe (error "Automata.Nfsa.minimize: missing state") (M.lookup oldState assignments)) (PM.indexArray t1 (S.findMin s))) partitions1)
-      canonization = debugTrace $ establishOrder newTransitions0
+      canonization = establishOrder newTransitions0
       description = "[canonization=" ++ show canonization ++ "][assignments=" ++ show assignments ++ "]"
       newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfsa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
       newTransitions2 = runST $ do
@@ -399,12 +399,12 @@ translateTransitionNfsa n (TransitionNfsa eps m) = TransitionNfsa
   (DM.mapBijection (SU.mapMonotonic (+n)) m)
 
 -- | Automaton that accepts all input. This is the identity
--- element for 'intersection'.
+-- for 'intersection'.
 acceptance :: Bounded t => Dfsa t
 acceptance = Dfsa (C.singleton (DM.pure 0)) (SU.singleton 0)
 
 -- | Automaton that rejects all input. This is the identity
--- element for 'union'.
+-- for 'union'.
 rejection :: Bounded t => Dfsa t
 rejection = Dfsa (C.singleton (DM.pure 0)) SU.empty
 
@@ -441,4 +441,3 @@ instance (Bounded t) => Semiring (Nfsa t) where
 data Epsilon = Epsilon !Int !Int
 
 newtype State s = State Int
-

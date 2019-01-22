@@ -49,6 +49,7 @@ rejection = AI.rejectionNfsa
 union :: (Bounded t) => Nfsa t -> Nfsa t -> Nfsa t
 union = AI.unionNfsa
 
+-- note: turn foldl' + mconcat into single foldMap?
 evaluate :: (Foldable f, Ord t) => Nfsa t -> f t -> Bool
 evaluate (Nfsa transitions finals) tokens = not $ SU.null $ SU.intersection
   ( foldl'

@@ -1,1 +1,7 @@
-packages: . ../primitive-containers ../contiguous ../contiguous-checked ../quickcheck-classes
+packages: .
+
+package semirings
+  flags: -hashable -containers -unordered-containers -vector
+
+package quickcheck-classes
+  flags: -aeson -semigroupoids

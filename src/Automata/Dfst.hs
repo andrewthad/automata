@@ -198,7 +198,7 @@ toDot :: (Bounded t, Enum t) => (t -> t -> m -> String) -> Dfst t m -> String
 toDot makeLabel (Dfst ts fs) = concat $
   [ "digraph D {\n" ]
   ++
-  dotNodes (sizeofArray ts) fs
+  dotNodes (sizeofArray ts - 1) fs
   ++
   (do (src,motions) <- zip (enumFrom (0 :: Int)) (E.toList ts)
       dotSourceEdges makeLabel src motions

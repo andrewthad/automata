@@ -26,6 +26,8 @@ module Automata.Dfst
   , state
   , transition
   , accept
+    -- * Misc
+  , toDot
   ) where
 
 import Prelude hiding (map)

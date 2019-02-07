@@ -36,7 +36,7 @@ import Control.Monad.ST (runST)
 import Data.Foldable (foldl',for_)
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
-import Data.Primitive (Array,indexArray)
+import Data.Primitive (Array,indexArray,sizeofArray)
 import Data.Semigroup (Last(..))
 import Data.Set (Set)
 import Data.ByteString (ByteString)
@@ -49,6 +49,12 @@ import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
 import qualified GHC.Exts as E
+
+-- TODO: Minimize DFST using Choffrut's algorithm as described in
+-- https://www.irif.fr/~jep/PDF/Exposes/Sequential.pdf. Original
+-- description of algorithm given in
+--   C. Choffrut, Minimizing subsequential transducers: a survey,
+--   Theoret. Comp. Sci. 292 (2003), 131–143.
 
 -- | Map over the output tokens.
 map :: Eq n => (m -> n) -> Dfst t m -> Dfst t n
@@ -186,5 +192,28 @@ build fromStartState =
 unsafeToDfsa :: Dfst t m -> Dfsa t
 unsafeToDfsa (Dfst t f) = Dfsa (fmap (DM.map motionDfstState) t) f
 
+toDot :: (Bounded t, Enum t) => (t -> t -> m -> String) -> Dfst t m -> String
+toDot makeLabel (Dfst ts fs) = concat $
+  [ "digraph D {\n" ]
+  ++
+  dotNodes (sizeofArray ts) fs
+  ++
+  (do (src,motions) <- zip (enumFrom (0 :: Int)) (E.toList ts)
+      dotSourceEdges makeLabel src motions
+  )
+  ++
+  [ "}\n" ]
 
+dotNodes :: Int -> SU.Set Int -> [String]
+dotNodes n fs = if n >= 0
+  then ("  N" ++ show n ++ " [shape=" ++ (if SU.member n fs then "circle" else "square") ++ "];\n") : dotNodes (n - 1) fs
+  else []
+
+dotSourceEdges :: (Bounded t, Enum t) => (t -> t -> m -> String) -> Int -> DM.Map t (MotionDfst m) -> [String]
+dotSourceEdges makeLabel src dsts = DM.foldrWithKey
+  (\lo hi motion xs -> dotEdge makeLabel src lo hi motion : xs) [] dsts
+
+dotEdge :: (t -> t -> m -> String) -> Int -> t -> t -> MotionDfst m -> String
+dotEdge makeLabel src lo hi (MotionDfst dst output) =
+  "  N" ++ show src ++ " -> N" ++ show dst ++ " [label=\"" ++ makeLabel lo hi output ++ "\"];\n"
 

@@ -118,32 +118,43 @@ evaluateAscii (Dfst transitions finals) !tokens =
         then Just (C.unsafeFromListReverseN (BC.length tokens) allOutput)
         else Nothing
 
-newtype Builder t m s a = Builder (Int -> [Edge t m] -> [Int] -> Result t m a)
+newtype Builder t m s a = Builder (Int -> Int -> [Edge t m] -> [Int] -> Result t m a)
   deriving stock (Functor)
 
-data Result t m a = Result !Int ![Edge t m] ![Int] a
+data Result t m a = Result
+  !Int -- default state for unspecified transitions
+  !Int -- next state to be served
+  ![Edge t m] -- all edges
+  ![Int] -- final states
+  a -- value
   deriving stock (Functor)
 
 instance Applicative (Builder t m s) where
-  pure a = Builder (\i es fs -> Result i es fs a)
-  Builder f <*> Builder g = Builder $ \i es fs -> case f i es fs of
-    Result i' es' fs' x -> case g i' es' fs' of
-      Result i'' es'' fs'' y -> Result i'' es'' fs'' (x y)
+  pure a = Builder (\d i es fs -> Result d i es fs a)
+  Builder f <*> Builder g = Builder $ \d i es fs -> case f d i es fs of
+    Result d' i' es' fs' x -> case g d' i' es' fs' of
+      Result d'' i'' es'' fs'' y -> Result d'' i'' es'' fs'' (x y)
 
 instance Monad (Builder t m s) where
-  Builder f >>= g = Builder $ \i es fs -> case f i es fs of
-    Result i' es' fs' a -> case g a of
-      Builder g' -> g' i' es' fs'
+  Builder f >>= g = Builder $ \d i es fs -> case f d i es fs of
+    Result d' i' es' fs' a -> case g a of
+      Builder g' -> g' d' i' es' fs'
 
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.
 state :: Builder t m s (State s)
-state = Builder $ \i edges final ->
-  Result (i + 1) edges final (State i)
+state = Builder $ \d i edges final ->
+  Result d (i + 1) edges final (State i)
 
 -- | Mark a state as being an accepting state. 
 accept :: State s -> Builder t m s ()
-accept (State n) = Builder $ \i edges final -> Result i edges (n : final) ()
+accept (State n) = Builder $ \d i edges final -> Result d i edges (n : final) ()
+
+-- | Set the default state to be used in transitions for values not
+--   covered by a range. This starts out as the start state, but
+--   it is often useful to create a failure state use that instead.
+unspecified :: State s -> Builder t m s ()
+unspecified (State n) = Builder $ \_ i edges final -> Result n i edges final ()
 
 -- | Add a transition from one state to another when the input token
 --   is inside the inclusive range. If multiple transitions from
@@ -156,15 +167,15 @@ transition ::
   -> State s -- ^ to state
   -> Builder t m s ()
 transition lo hi output (State source) (State dest) =
-  Builder $ \i edges final -> Result i (Edge source dest lo hi output : edges) final ()
+  Builder $ \d i edges final -> Result d i (Edge source dest lo hi output : edges) final ()
 
 -- | The argument function turns a start state into an NFST builder. This
 -- function converts the builder to a usable transducer.
 build :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m) => (forall s. State s -> Builder t m s a) -> Dfst t m
 build fromStartState =
   case state >>= fromStartState of
-    Builder f -> case f 0 [] [] of
-      Result totalStates edges final _ ->
+    Builder f -> case f 0 0 [] [] of
+      Result _ totalStates edges final _ ->
         let ts0 = runST $ do
               transitions <- C.replicateM totalStates (DM.pure Nothing)
               outbounds <- C.replicateM totalStates []

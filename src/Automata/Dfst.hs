@@ -23,6 +23,7 @@ module Automata.Dfst
   , State
     -- ** Functions
   , build
+  , buildDefaulted
   , state
   , transition
   , accept

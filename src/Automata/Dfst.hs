@@ -26,6 +26,7 @@ module Automata.Dfst
   , state
   , transition
   , accept
+  , unspecified
     -- * Misc
   , toDot
   ) where

@@ -34,6 +34,7 @@ import Prelude hiding (map)
 
 import Automata.Internal (State(..),Dfsa(..),composeMapping)
 import Automata.Internal.Transducer (Dfst(..),MotionDfst(..),Edge(..),EdgeDest(..))
+import Control.Applicative (liftA2)
 import Control.Monad.ST (runST)
 import Data.Foldable (foldl',for_)
 import Data.Map.Strict (Map)
@@ -158,6 +159,20 @@ transition ::
 transition lo hi output (State source) (State dest) =
   Builder $ \i edges final -> Result i (Edge source dest lo hi output : edges) final ()
 
+-- | This does the same thing as 'build' except that you get to create a
+--   default state (distinct from the start state) that is used when a
+--   transition does not cover every token. With 'build', the start state
+--   is used for this, but it is often desirable to have a different state
+--   for this purpose.
+buildDefaulted :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
+  => (forall s. State s -> State s -> Builder t m s a)
+  -> Dfst t m
+buildDefaulted fromStartAndDefault =
+  case do { (start, def) <- liftA2 (,) state state; fromStartAndDefault start def; pure def;} of
+    Builder f -> case f 0 [] [] of
+      Result totalStates edges final (State def) ->
+        internalBuild totalStates edges final def
+
 -- | The argument function turns a start state into an NFST builder. This
 -- function converts the builder to a usable transducer.
 build :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m) => (forall s. State s -> Builder t m s a) -> Dfst t m
@@ -165,25 +180,30 @@ build fromStartState =
   case state >>= fromStartState of
     Builder f -> case f 0 [] [] of
       Result totalStates edges final _ ->
-        let ts0 = runST $ do
-              transitions <- C.replicateM totalStates (DM.pure Nothing)
-              outbounds <- C.replicateM totalStates []
-              for_ edges $ \(Edge source destination lo hi output) -> do
-                edgeDests0 <- C.read outbounds source
-                let !edgeDests1 = EdgeDest destination lo hi output : edgeDests0
-                C.write outbounds source edgeDests1
-              (outbounds' :: Array [EdgeDest t m]) <- C.unsafeFreeze outbounds
-              flip C.imapMutable' transitions $ \i _ -> 
-                let dests = C.index outbounds' i
-                 in mconcat
-                      ( L.map
-                        (\(EdgeDest dest lo hi output) ->
-                          DM.singleton mempty lo hi (Just (Last (MotionDfst dest output)))
-                        )
-                        dests
-                      )
-              C.unsafeFreeze transitions
-         in Dfst (fmap (DM.map (maybe (MotionDfst 0 mempty) getLast)) ts0) (SU.fromList final)
+        internalBuild totalStates edges final 0
+
+internalBuild :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
+  => Int -> [Edge t m] -> [Int] -> Int -> Dfst t m
+internalBuild totalStates edges final def = 
+  let ts0 = runST $ do
+        transitions <- C.replicateM totalStates (DM.pure Nothing)
+        outbounds <- C.replicateM totalStates []
+        for_ edges $ \(Edge source destination lo hi output) -> do
+          edgeDests0 <- C.read outbounds source
+          let !edgeDests1 = EdgeDest destination lo hi output : edgeDests0
+          C.write outbounds source edgeDests1
+        (outbounds' :: Array [EdgeDest t m]) <- C.unsafeFreeze outbounds
+        flip C.imapMutable' transitions $ \i _ -> 
+          let dests = C.index outbounds' i
+           in mconcat
+                ( L.map
+                  (\(EdgeDest dest lo hi output) ->
+                    DM.singleton mempty lo hi (Just (Last (MotionDfst dest output)))
+                  )
+                  dests
+                )
+        C.unsafeFreeze transitions
+   in Dfst (fmap (DM.map (maybe (MotionDfst def mempty) getLast)) ts0) (SU.fromList final)
 
 -- collapse :: Dfst t m -> Dfst t m
 -- collapse = MotionDfst 

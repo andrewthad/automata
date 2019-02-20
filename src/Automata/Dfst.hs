@@ -59,6 +59,8 @@ import qualified GHC.Exts as E
 -- description of algorithm given in
 --   C. Choffrut, Minimizing subsequential transducers: a survey,
 --   Theoret. Comp. Sci. 292 (2003), 131–143.
+-- This would give us a meaningful Eq instance, which would let us
+-- do better property-testing on DFST.
 
 -- | Map over the output tokens.
 map :: Eq n => (m -> n) -> Dfst t m -> Dfst t n
@@ -71,6 +73,21 @@ map f (Dfst t m) =
 rejection :: (Bounded t, Monoid m) => Dfst t m
 rejection = Dfst (C.singleton (DM.pure (MotionDfst 0 mempty))) SU.empty
 
+-- | Union two finite state transducers. Roughly, what it does is:
+--
+-- 1. Compute the equivalent DFSA. That is, eliminate the output tapes
+--    and minimize the resulting DFSA, keeping track of which states from
+--    an original transducer map to which states in the corresponding
+--    automaton.
+-- 2. Union the two automata (synchronous composition).
+-- 3. Reintroduce the states from the original transducers, monoidally
+--    appending outputs when a transition corresponds to more than
+--    one output.
+--
+-- The new transducer can only accept input that either of the original
+-- two could accept. However, there is non-intuitive (but well-defined)
+-- behavior the emerges. States that appear unequal can be combined by
+-- this function because of pass that discards output.
 union :: forall t m. (Ord t, Bounded t, Enum t, Monoid m) => Dfst t m -> Dfst t m -> Dfst t m
 union a@(Dfst ax _) b@(Dfst bx _) =
   let (mapping, Dfsa t0 f) = composeMapping (||) (unsafeToDfsa a) (unsafeToDfsa b)

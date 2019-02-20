@@ -7,6 +7,9 @@ module Automata.Internal.Transducer
   , MotionDfst(..)
   , Edge(..)
   , EdgeDest(..)
+  , CompactDfst(..)
+  , CompactSequence(..)
+  , TransitionCompactDfst(..)
   , epsilonClosure
   , rejection
   , union
@@ -20,6 +23,22 @@ import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set.Unboxed as SU
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Lifted.Unlifted as MLN
+
+data CompactDfst t m = CompactDfst
+  { compactDfstTransition :: !(Array (TransitionCompactDfst t m))
+  , compactDfstFinal :: !(SU.Set Int)
+  }
+
+data TransitionCompactDfst t m
+  = TransitionCompactDfstSingle (CompactSequence t m)
+  | TransitionCompactDfstMultiple {-# UNPACK #-} !(DM.Map t (MotionDfst m))
+
+data CompactSequence t m = CompactSequence
+  !(Array t) -- sequence of inputs to match, length >= 1
+  !Int -- destination after straight-and-narrow path
+  !Int -- destination after veering off path
+  !m -- output from starting straight-and-narrow path
+  !m -- output after veering off path
 
 -- | A deterministic finite state transducer.
 data Dfst t m = Dfst

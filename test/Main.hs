@@ -6,8 +6,9 @@ import Automata.Dfsa (Dfsa)
 import Automata.Dfst (Dfst)
 import Automata.Nfsa (Nfsa)
 import Automata.Nfst (Nfst)
+import Automata.Dfst.Compact (Ranged(..))
 import Control.Monad (forM_,replicateM)
-import Data.Enum.Types (B(..),D(..))
+import Data.Enum.Types (A(..),B(..),D(..),E(..))
 import Data.Monoid (All(..))
 import Data.Primitive (Array)
 import Data.Proxy (Proxy(..))
@@ -24,6 +25,7 @@ import qualified Automata.Nfsa as Nfsa
 import qualified Automata.Nfst as Nfst
 import qualified Automata.Dfsa as Dfsa
 import qualified Automata.Dfst as Dfst
+import qualified Automata.Dfst.Compact as CDfst
 import qualified Automata.Nfsa.Builder as B
 import qualified Data.Set as S
 import qualified Data.List as L
@@ -92,6 +94,9 @@ tests = testGroup "Automata"
         , TL.testProperty "7" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex7) [a,b,c,d] == Nfsa.evaluate ex7 [a,b,c,d]
         ]
       , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Nfsa D)))
+      -- , testGroup "compact"
+      --   [ testCase "A"
+      --   ]
       ]
     ]
   , testGroup "Dfsa"
@@ -101,6 +106,7 @@ tests = testGroup "Automata"
       , testCase "C" (Dfsa.evaluate exDfsa2 [D3,D3] @?= False)
       , testCase "D" (Dfsa.evaluate exDfsa2 [D1] @?= True)
       , testCase "E" (Dfsa.evaluate exDfsa2 [D0,D2] @?= True)
+      , testCase "F" (Dfsa.evaluate exDfsa2 [D0,D2] @?= True)
       ]
     , testGroup "union"
       [ testGroup "unit"
@@ -157,6 +163,13 @@ tests = testGroup "Automata"
     [ testGroup "evaluate"
       [ testCase "A" (Dfst.evaluate exDfst1 [D0,D2] @?= Nothing)
       , testCase "B" (Dfst.evaluate exDfst1 [D0,D1] @?= Just (E.fromList [B1,B0]))
+      , testCase "C" (Dfst.evaluate exDfst3 [E2,E2,E2,E2,E2,E2] @?= Just (E.fromList [D1,D1,D1,D1,D1,D1]))
+      ]
+    , testGroup "compact"
+      [ testCase "A" (CDfst.evaluateList (CDfst.compact exDfst1) [D0,D2] @?= Nothing)
+      , testCase "B" (CDfst.evaluateList (CDfst.compact exDfst1) [D0,D1] @?= Just (E.fromList [Ranged 0 1 B1,Ranged 1 1 B0]))
+      , testCase "C" (CDfst.evaluateList (CDfst.compact exDfst3) [E2,E2,E2,E2,E2,E2] @?= Just (E.fromList [Ranged 0 6 D1]))
+      , TL.testProperty "D" $ \x -> let dfst = generateDfst1 x in fmap expandRanged (CDfst.evaluateList (CDfst.compact dfst) [A0,A0,A0]) == Dfst.evaluate dfst [A0,A0,A0]
       ]
     , testGroup "union"
       [ testGroup "unit"
@@ -166,6 +179,9 @@ tests = testGroup "Automata"
       ]
     ]
   ]
+
+expandRanged :: Array (Ranged a) -> Array a
+expandRanged = foldMap $ \(Ranged _ len m) -> E.fromList (replicate len m)
 
 subresult :: Ord a => [Set a] -> Maybe (Array (Set a)) -> Bool
 subresult xs = \case
@@ -179,12 +195,6 @@ setSubresult xs = \case
 
 lawsToTest :: QCC.Laws -> TestTree
 lawsToTest (QCC.Laws name pairs) = testGroup name (map (uncurry TQC.testProperty) pairs)
-
-instance Semigroup B where
-  (<>) = max
-
-instance Monoid B where
-  mempty = minBound
 
 instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Dfsa t) where
   arbitrary = do
@@ -441,6 +451,41 @@ exDfst2 = Dfst.build $ \s0 -> do
   Dfst.transition D1 D1 B1 s1 s2
   Dfst.transition D2 D2 B0 s2 s0
 
+exDfst3 :: Dfst E D
+exDfst3 = Dfst.build $ \s0 -> do
+  s1 <- Dfst.state
+  s2 <- Dfst.state
+  s3 <- Dfst.state
+  s4 <- Dfst.state
+  s5 <- Dfst.state
+  s6 <- Dfst.state
+  Dfst.accept s6
+  Dfst.transition E2 E2 D1 s0 s1
+  Dfst.transition E2 E2 D1 s1 s2
+  Dfst.transition E2 E2 D1 s2 s3
+  Dfst.transition E2 E2 D1 s3 s4
+  Dfst.transition E2 E2 D1 s4 s5
+  Dfst.transition E2 E2 D1 s5 s6
+
+-- This is not exhaustive, but it is pretty thorough.
+generateDfst1 :: (B,B,B,B,B,B,B,B,B,B,B) -> Dfst A B
+generateDfst1 (x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10) = Dfst.build $ \s0 -> do
+  s1 <- Dfst.state
+  s2 <- Dfst.state
+  s3 <- Dfst.state
+  Dfst.accept s3
+  Dfst.transition A0 A0 x0 s0 s0
+  Dfst.transition A0 A0 x1 s0 s1
+  Dfst.transition A0 A0 x2 s0 s3
+  Dfst.transition A0 A0 x3 s1 s0
+  Dfst.transition A0 A0 x4 s1 s2
+  Dfst.transition A0 A0 x5 s1 s3
+  Dfst.transition A0 A0 x6 s2 s0
+  Dfst.transition A0 A0 x7 s2 s1
+  Dfst.transition A0 A0 x8 s2 s3
+  Dfst.transition A0 A0 x9 s3 s0
+  Dfst.transition A0 A0 x10 s3 s1
+  
 -- This uses s3 as a dead state. So, we are roughly testing
 -- all DFA with three nodes, a binary transition function,
 -- and a single fixed end state.

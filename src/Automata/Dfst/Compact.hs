@@ -134,7 +134,7 @@ compact (Dfst transitions finals) =
               PM.writeArray states ix $ TransitionCompactDfstSingle $ CompactSequence
                 (E.fromList string)
                 (oldToNew M.! successStateOld)
-                (motionDfstState (snd (singles M.! ixOld)))
+                (oldToNew M.! (motionDfstState (snd (singles M.! ixOld))))
                 (motionDfstOutput (fst (singles M.! ixOld)))
                 (motionDfstOutput (snd (singles M.! ixOld)))
         PM.unsafeFreezeArray states

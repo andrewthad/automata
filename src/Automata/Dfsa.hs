@@ -12,6 +12,11 @@ module Automata.Dfsa
     Dfsa
     -- ** Evaluation
   , evaluate
+    -- ** Predicates
+  , null
+  , universal
+  , subsumes
+  , disjoint
     -- ** Composition
   , union
   , intersection
@@ -29,6 +34,8 @@ module Automata.Dfsa
   , accept
   ) where
 
+import Prelude hiding (null)
+
 import Automata.Internal (Dfsa(..),State(..),union,intersection,acceptance,rejection,minimize)
 import Data.Foldable (foldl',for_)
 import Data.Primitive (Array)
@@ -45,6 +52,29 @@ evaluate :: (Foldable f, Ord t) => Dfsa t -> f t -> Bool
 evaluate (Dfsa transitions finals) tokens = SU.member
   (foldl' (\(active :: Int) token -> DM.lookup token (C.index transitions active)) 0 tokens)
   finals
+
+-- | Does the DFSA reject all strings?
+null :: (Bounded t, Eq t) => Dfsa t -> Bool
+null = (== rejection)
+
+-- | Does the DFSA accept all strings?
+universal :: (Bounded t, Eq t) => Dfsa t -> Bool
+universal = (== acceptance)
+
+-- | Does the first argument accept all strings that the second argument accepts?
+-- More precisely:
+--
+-- > x `subsumes` y ⇔ (∀s. evaluate y s ⇒ evaluate x s)
+subsumes :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Bool
+subsumes x y = x == union x y
+
+-- | If the two DFSA accept any of the same strings, returns 'False'. Otherwise,
+-- the sets of accepted strings are disjoint, and this returns 'True'. More
+-- precisely:
+--
+-- > disjoint x y ⇔ (∀s. ¬(evaluate x s ∧ evaluate y s))
+disjoint :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Bool
+disjoint x y = intersection x y == rejection
 
 newtype Builder t s a = Builder (Int -> [Edge t] -> [Int] -> Result t a)
   deriving stock (Functor)

@@ -269,8 +269,8 @@ toDot makeSequenceLabel makeLabel (CompactDfst ts fs) = concat $
         TransitionCompactDfstMultiple motions ->
           dotSourceEdges makeLabel src motions
         TransitionCompactDfstSingle (CompactSequence inputs successState failureState successOutput failureOutput) ->
-          [ "  N" ++ show src ++ " -> N" ++ show successState ++ " [label=\"" ++ makeSequenceLabel (E.toList inputs) successOutput ++ "\"];\n"
-          , "  N" ++ show src ++ " -> N" ++ show failureState ++ " [label=\"" ++ makeSequenceLabel [] failureOutput ++ "\"];\n"
+          [ "  N" ++ show src ++ " -> N" ++ show successState ++ " [label=\"" ++ escapeQuotes (makeSequenceLabel (E.toList inputs) successOutput) ++ "\"];\n"
+          , "  N" ++ show src ++ " -> N" ++ show failureState ++ " [label=\"" ++ escapeQuotes (makeSequenceLabel [] failureOutput) ++ "\"];\n"
           ]
   )
   ++
@@ -287,5 +287,12 @@ dotSourceEdges makeLabel src dsts = DM.foldrWithKey
 
 dotEdge :: (t -> t -> m -> String) -> Int -> t -> t -> MotionDfst m -> String
 dotEdge makeLabel src lo hi (MotionDfst dst output) =
-  "  N" ++ show src ++ " -> N" ++ show dst ++ " [label=\"" ++ makeLabel lo hi output ++ "\"];\n"
+  "  N" ++ show src ++ " -> N" ++ show dst ++ " [label=\"" ++ escapeQuotes (makeLabel lo hi output) ++ "\"];\n"
+
+escapeQuotes :: String -> String
+escapeQuotes str = do
+  c <- str
+  if c == '"'
+    then "\\\""
+    else [c]
 

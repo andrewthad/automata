@@ -292,7 +292,8 @@ dotEdge makeLabel src lo hi (MotionDfst dst output) =
 escapeQuotes :: String -> String
 escapeQuotes str = do
   c <- str
-  if c == '"'
-    then "\\\""
-    else [c]
+  case c of
+    '"' -> "\\\""
+    '\\' -> "\\\\"
+    _ -> [c]
 

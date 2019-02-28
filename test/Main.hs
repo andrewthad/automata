@@ -164,12 +164,17 @@ tests = testGroup "Automata"
       [ testCase "A" (Dfst.evaluate exDfst1 [D0,D2] @?= Nothing)
       , testCase "B" (Dfst.evaluate exDfst1 [D0,D1] @?= Just (E.fromList [B1,B0]))
       , testCase "C" (Dfst.evaluate exDfst3 [E2,E2,E2,E2,E2,E2] @?= Just (E.fromList [D1,D1,D1,D1,D1,D1]))
+      , testCase "D" (Dfst.evaluate exDfst4 "Xfoo, " @?= Just (E.fromList (replicate 6 A0)))
+      , testCase "E" (Dfst.evaluate exDfst4 "Xfoo,  " @?= Just (E.fromList (replicate 7 A0)))
       ]
     , testGroup "compact"
       [ testCase "A" (CDfst.evaluateList (CDfst.compact exDfst1) [D0,D2] @?= Nothing)
       , testCase "B" (CDfst.evaluateList (CDfst.compact exDfst1) [D0,D1] @?= Just (E.fromList [Ranged 0 1 B1,Ranged 1 1 B0]))
       , testCase "C" (CDfst.evaluateList (CDfst.compact exDfst3) [E2,E2,E2,E2,E2,E2] @?= Just (E.fromList [Ranged 0 6 D1]))
-      , TL.testProperty "D" $ \x -> let dfst = generateDfst1 x in fmap expandRanged (CDfst.evaluateList (CDfst.compact dfst) [A0,A0,A0]) == Dfst.evaluate dfst [A0,A0,A0]
+      , testCase "D" (CDfst.evaluateList (CDfst.compact exDfst4) "Xfoo, " @?= Just (E.fromList [Ranged 0 6 A0]))
+      , testCase "E" (CDfst.evaluateList (CDfst.compact exDfst4) "Xfoo,  " @?= Just (E.fromList [Ranged 0 7 A0]))
+      , testCase "F" (CDfst.evaluateList (CDfst.compact exDfst4) "Xfoo,   " @?= Just (E.fromList [Ranged 0 8 A0]))
+      , TL.testProperty "G" $ \x -> let dfst = generateDfst1 x in fmap expandRanged (CDfst.evaluateList (CDfst.compact dfst) [A0,A0,A0]) == Dfst.evaluate dfst [A0,A0,A0]
       ]
     , testGroup "union"
       [ testGroup "unit"
@@ -466,6 +471,28 @@ exDfst3 = Dfst.build $ \s0 -> do
   Dfst.transition E2 E2 D1 s3 s4
   Dfst.transition E2 E2 D1 s4 s5
   Dfst.transition E2 E2 D1 s5 s6
+
+exDfst4 :: Dfst Char A
+exDfst4 = Dfst.buildDefaulted $ \s0 s5 -> do
+  s1 <- Dfst.state
+  s2 <- Dfst.state
+  s3 <- Dfst.state
+  s4 <- Dfst.state
+  Dfst.accept s4
+  Dfst.transition 'X' 'X' A0 s0 s1
+  Dfst.transition ',' ',' A0 s1 s5
+  Dfst.transition minBound (pred ',') A0 s1 s2
+  Dfst.transition (succ ',') maxBound A0 s1 s2
+  Dfst.transition ',' ',' A0 s2 s3
+  Dfst.transition minBound (pred ',') A0 s2 s2
+  Dfst.transition (succ ',') maxBound A0 s2 s2
+  Dfst.transition (' ') (' ') A0 s3 s4
+  Dfst.transition minBound (pred ' ') A0 s3 s5
+  Dfst.transition (succ ' ') maxBound A0 s3 s5
+  Dfst.transition (' ') (' ') A0 s4 s4
+  Dfst.transition minBound (pred ' ') A0 s4 s5
+  Dfst.transition (succ ' ') maxBound A0 s4 s5
+
 
 -- This is not exhaustive, but it is pretty thorough.
 generateDfst1 :: (B,B,B,B,B,B,B,B,B,B,B) -> Dfst A B

@@ -177,13 +177,13 @@ evaluateList (CompactDfst transitions finals) tokensX = case tokensX of
           )
           (goUnknown failureState (ix + 1) outputSz failureToken nextOutputStart output tokensB)
           (shortcutEquality nextOutputToken failureToken)
-      else goUnknown successState ix outputSz nextOutputToken nextOutputStart output tokensB
+      else goUnknown successState ix outputSz nextOutputToken nextOutputStart output (tokenB : tokensB)
   goUnknown :: Int -> Int -> Int -> m -> Int -> [Ranged m] -> [t] -> Maybe (Array (Ranged m))
   goUnknown !state !ix !outputSz !nextOutputToken !nextOutputStart !output !tokensA = case tokensA of
     [] -> if SU.member state finals
       then let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
             in Just $! C.unsafeFromListReverseN (outputSz + 1) (r : output)
-      else Nothing
+      else Nothing -- error ("uhoetn " ++ show state ++ " " ++ show finals) -- Nothing
     tokenB : tokensB -> case PM.indexArray transitions state of
       TransitionCompactDfstSingle (CompactSequence string successState failureState successToken failureToken) ->
         if PM.indexArray string 0 == tokenB

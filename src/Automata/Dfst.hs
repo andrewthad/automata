@@ -52,6 +52,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
+import qualified Data.Semigroup as SG
 import qualified GHC.Exts as E
 
 -- TODO: Minimize DFST using Choffrut's algorithm as described in
@@ -153,6 +154,13 @@ instance Monad (Builder t m s) where
   Builder f >>= g = Builder $ \i es fs -> case f i es fs of
     Result i' es' fs' a -> case g a of
       Builder g' -> g' i' es' fs'
+
+instance Semigroup a => Semigroup (Builder t m s a) where
+  (<>) = liftA2 (SG.<>)
+
+instance (Monoid a, Semigroup a) => Monoid (Builder t m s a) where
+  mempty = pure mempty
+  mappend = (SG.<>)
 
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.

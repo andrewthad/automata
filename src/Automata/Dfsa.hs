@@ -12,6 +12,9 @@ module Automata.Dfsa
     Dfsa
     -- ** Evaluation
   , evaluate
+    -- ** Properties
+  , order
+  , size
     -- ** Predicates
   , null
   , universal
@@ -29,6 +32,7 @@ module Automata.Dfsa
   , State
     -- ** Functions
   , build
+  , buildDefaulted
   , state
   , transition
   , accept
@@ -37,11 +41,13 @@ module Automata.Dfsa
 import Prelude hiding (null)
 
 import Automata.Internal (Dfsa(..),State(..),union,intersection,acceptance,rejection,minimize)
+import Control.Applicative (liftA2)
 import Data.Foldable (foldl',for_)
 import Data.Primitive (Array)
 import Data.Semigroup (Last(..))
 import Control.Monad.ST (runST)
 
+import qualified Data.Primitive as P
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Set.Unboxed as SU
@@ -52,6 +58,21 @@ evaluate :: (Foldable f, Ord t) => Dfsa t -> f t -> Bool
 evaluate (Dfsa transitions finals) tokens = SU.member
   (foldl' (\(active :: Int) token -> DM.lookup token (C.index transitions active)) 0 tokens)
   finals
+
+-- | The number of states. The name _order_ comes from graph theory,
+-- where the order of a graph is the cardinality of the set of vertices.
+order :: Dfsa t -> Int
+order (Dfsa t _) = P.sizeofArray t
+
+-- | The number of transitions. The name _size_ comes from graph theory,
+-- where the size of a graph is the cardinality of the set of edges. Be
+-- careful when interpreting this number. There may be multiple transitions
+-- from one state to another when the range of input causing this transition
+-- is non-contiguous.
+size :: Dfsa t -> Int
+size (Dfsa t _) = foldl'
+  ( \acc m -> acc + DM.size m
+  ) 0 t
 
 -- | Does the DFSA reject all strings?
 null :: (Bounded t, Eq t) => Dfsa t -> Bool
@@ -98,29 +119,52 @@ data Edge t = Edge !Int !Int !t !t
 data EdgeDest t = EdgeDest !Int t t
 
 -- | The argument function takes a start state and builds an NFA. This
--- function will execute the builder.
-build :: forall t a. (Bounded t, Ord t, Enum t) => (forall s. State s -> Builder t s a) -> Dfsa t
+-- function will execute the builder. Unspecified transitions move to
+-- the start state.
+build :: forall t a. (Bounded t, Ord t, Enum t)
+  => (forall s. State s -> Builder t s a) -> Dfsa t
 build fromStartState =
   case state >>= fromStartState of
     Builder f -> case f 0 [] [] of
       Result totalStates edges final _ ->
-        let ts = runST $ do
-              transitions <- C.replicateM totalStates (DM.pure Nothing)
-              outbounds <- C.replicateM totalStates []
-              for_ edges $ \(Edge source destination lo hi) -> do
-                edgeDests0 <- C.read outbounds source
-                let !edgeDests1 = EdgeDest destination lo hi : edgeDests0
-                C.write outbounds source edgeDests1
-              (outbounds' :: Array [EdgeDest t]) <- C.unsafeFreeze outbounds
-              flip C.imapMutable' transitions $ \i _ ->
-                let dests = C.index outbounds' i
-                 in mconcat
-                      ( map
-                        (\(EdgeDest dest lo hi) -> DM.singleton Nothing lo hi (Just (Last dest)))
-                        dests
-                      )
-              C.unsafeFreeze transitions
-         in minimize (fmap (DM.map (maybe 0 getLast)) ts) (SU.fromList final)
+        internalBuild totalStates edges final 0
+
+-- | This does the same thing as 'build' except that you get to create a
+--   default state (distinct from the start state) that is used when a
+--   transition does not cover every token. With 'build', the start state
+--   is used for this, but it is often desirable to have a different state
+--   for this purpose.
+buildDefaulted :: forall t m a. (Bounded t, Ord t, Enum t)
+  => (forall s. State s -> State s -> Builder t s a)
+  -> Dfsa t
+buildDefaulted fromStartAndDefault =
+  case do { (start, def) <- liftA2 (,) state state; fromStartAndDefault start def; pure def;} of
+    Builder f -> case f 0 [] [] of
+      Result totalStates edges final (State def) ->
+        internalBuild totalStates edges final def
+
+-- | The argument function takes a start state and builds an NFA. This
+-- function will execute the builder.
+internalBuild :: forall t a. (Bounded t, Ord t, Enum t)
+  => Int -> [Edge t] -> [Int] -> Int -> Dfsa t
+internalBuild totalStates edges final def =
+  let ts = runST $ do
+        transitions <- C.replicateM totalStates (DM.pure Nothing)
+        outbounds <- C.replicateM totalStates []
+        for_ edges $ \(Edge source destination lo hi) -> do
+          edgeDests0 <- C.read outbounds source
+          let !edgeDests1 = EdgeDest destination lo hi : edgeDests0
+          C.write outbounds source edgeDests1
+        (outbounds' :: Array [EdgeDest t]) <- C.unsafeFreeze outbounds
+        flip C.imapMutable' transitions $ \i _ ->
+          let dests = C.index outbounds' i
+           in mconcat
+                ( map
+                  (\(EdgeDest dest lo hi) -> DM.singleton Nothing lo hi (Just (Last dest)))
+                  dests
+                )
+        C.unsafeFreeze transitions
+   in minimize (fmap (DM.map (maybe 0 getLast)) ts) (SU.fromList final)
   
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.

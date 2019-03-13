@@ -229,9 +229,9 @@ minimize t0 f0 = snd (minimizeMapping t0 f0)
 --   NFST to DFST minimizer.
 minimizeMapping :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> (Map Int Int, Dfsa t)
 minimizeMapping t0 f0 =
-  let partitions0 = go (S.fromList [f1,S.difference q0 f1]) (S.singleton f1)
+  let !partitions0 = go (S.fromList [f1,S.difference q0 f1]) (S.singleton f1)
       -- We move the partition containing the start state to the front.
-      partitions1 = case L.find (S.member 0) partitions0 of
+      !partitions1 = case L.find (S.member 0) partitions0 of
         Just startStates -> startStates : deletePredicate (\s -> S.member 0 s || S.null s) (S.toList partitions0)
         Nothing -> error "Automata.Nfsa.minimize: incorrect"
       -- Creates a map from old state to new state. This is not a bijection
@@ -268,13 +268,18 @@ minimizeMapping t0 f0 =
   initialCanonization = establishOrder t0
   -- The inverted transitions has the destination state as well as
   -- all source states that lead to it when the token is consumed. 
+  {-# SCC invertedTransitions #-}
   invertedTransitions :: DM.Map t (MLL.Map Int (Set Int))
-  invertedTransitions = mconcat (toList (C.imap (\ix m -> DM.mapBijection (\dest -> MLL.singleton dest (S.singleton ix)) m) t1 :: Array (DM.Map t (MLL.Map Int (Set Int)))))
+  invertedTransitions = mconcat
+    (toList (C.imap (\ix m -> DM.mapBijection (\dest -> MLL.singleton dest (S.singleton ix)) m) t1 :: Array (DM.Map t (MLL.Map Int (Set Int)))))
   -- The result of go is set of disjoint sets. It represents the equivalence classes
   -- that have been established. All references to any state in an equivalence class
   -- can be replaced with any of the other states in the same equivalence class.
+  -- The implementation of go closely mirrors the Hopcroft's Algorithm psuedocode
+  -- from Wikipedia: https://en.wikipedia.org/wiki/DFA_minimization#Hopcroft's_algorithm
+  {-# SCC go #-}
   go :: Set (Set Int) -> Set (Set Int) -> Set (Set Int)
-  go p1 w1 = case S.minView w1 of
+  go !p1 !w1 = case S.minView w1 of
     Nothing -> p1
     Just (a,w2) ->
       let (p2,w3) = DM.foldl'

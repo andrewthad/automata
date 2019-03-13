@@ -23,6 +23,7 @@ main = defaultMain
         [ bench "5" (whnf (\x -> Dfsa.union dfsa3_5 x) dfsa1_5)
         , bench "10" (whnf (\x -> Dfsa.union dfsa3_10 x) dfsa1_10)
         , bench "20" (whnf (\x -> Dfsa.union dfsa3_20 x) dfsa1_20)
+        , bench "40" (whnf (\x -> Dfsa.union dfsa3_40 x) dfsa1_40)
         ]
       , bgroup "disjoint-throughout"
         [ bench "10" (whnf (\x -> Dfsa.union dfsa4_10 x) dfsa1_10)
@@ -45,6 +46,9 @@ dfsa1_10 = Dfsa.buildDefaulted (dfsaBuilder1 10)
 dfsa1_20 :: Dfsa D
 dfsa1_20 = Dfsa.buildDefaulted (dfsaBuilder1 20)
 
+dfsa1_40 :: Dfsa D
+dfsa1_40 = Dfsa.buildDefaulted (dfsaBuilder1 40)
+
 dfsa2_10 :: Dfsa D
 dfsa2_10 = Dfsa.buildDefaulted (dfsaBuilder2 10)
 
@@ -59,6 +63,9 @@ dfsa3_10 = Dfsa.buildDefaulted (dfsaBuilder3 10)
 
 dfsa3_20 :: Dfsa D
 dfsa3_20 = Dfsa.buildDefaulted (dfsaBuilder3 20)
+
+dfsa3_40 :: Dfsa D
+dfsa3_40 = Dfsa.buildDefaulted (dfsaBuilder3 40)
 
 dfsa4_10 :: Dfsa D
 dfsa4_10 = Dfsa.buildDefaulted (dfsaBuilder4 10)
@@ -119,14 +126,14 @@ dfsaBuilder2 sz start _ = do
 --  +---------+------> ZZ <-----------------+
 --
 -- This is the same as dfsaBuilder1 except that the transition
--- from ZX to ZY requires D2.
+-- from ZX to ZY requires D3.
 dfsaBuilder3 :: Int -> Dfsa.State s -> Dfsa.State s -> Dfsa.Builder D s ()
 dfsaBuilder3 sz start _ = do
   let go !ix !old = if ix < sz
         then do
           new <- Dfsa.state
           if ix == sz - 1
-            then Dfsa.transition D2 D2 old new
+            then Dfsa.transition D3 D3 old new
             else Dfsa.transition D1 D1 old new
           go (ix + 1) new
         else Dfsa.accept old

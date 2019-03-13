@@ -36,6 +36,8 @@ module Automata.Dfsa
   , state
   , transition
   , accept
+    -- * Misc
+  , toDot
   ) where
 
 import Prelude hiding (null)
@@ -51,6 +53,7 @@ import qualified Data.Primitive as P
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Set.Unboxed as SU
+import qualified GHC.Exts as E
 
 -- | Evaluate a foldable collection of tokens against the DFA. This
 -- returns true if the string is accepted by the language.
@@ -164,7 +167,7 @@ internalBuild totalStates edges final def =
                   dests
                 )
         C.unsafeFreeze transitions
-   in minimize (fmap (DM.map (maybe 0 getLast)) ts) (SU.fromList final)
+   in minimize (fmap (DM.map (maybe def getLast)) ts) (SU.fromList final)
   
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.
@@ -187,4 +190,29 @@ transition ::
   -> Builder t s ()
 transition lo hi (State source) (State dest) =
   Builder $ \i edges final -> Result i (Edge source dest lo hi : edges) final ()
+
+toDot :: (Bounded t, Enum t) => (t -> t -> String) -> Dfsa t -> String
+toDot makeLabel (Dfsa ts fs) = concat $
+  [ "digraph D {\n" ]
+  ++
+  dotNodes (P.sizeofArray ts - 1) fs
+  ++
+  (do (src,motions) <- zip (enumFrom (0 :: Int)) (E.toList ts)
+      dotSourceEdges makeLabel src motions
+  )
+  ++
+  [ "}\n" ]
+
+dotNodes :: Int -> SU.Set Int -> [String]
+dotNodes n fs = if n >= 0
+  then ("  N" ++ show n ++ " [shape=" ++ (if SU.member n fs then "circle" else "square") ++ "];\n") : dotNodes (n - 1) fs
+  else []
+
+dotSourceEdges :: (Bounded t, Enum t) => (t -> t -> String) -> Int -> DM.Map t Int -> [String]
+dotSourceEdges makeLabel src dsts = DM.foldrWithKey
+  (\lo hi motion xs -> dotEdge makeLabel src lo hi motion : xs) [] dsts
+
+dotEdge :: (t -> t -> String) -> Int -> t -> t -> Int -> String
+dotEdge makeLabel src lo hi dst =
+  "  N" ++ show src ++ " -> N" ++ show dst ++ " [label=\"" ++ makeLabel lo hi ++ "\"];\n"
 

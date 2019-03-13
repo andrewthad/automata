@@ -15,6 +15,9 @@ module Automata.Dfst
   , evaluateAscii
   , union
   , map
+    -- ** Properties
+  , order
+  , size
     -- ** Special Transducers
   , rejection
     -- * Builder
@@ -49,10 +52,11 @@ import qualified Data.ByteString.Char8 as BC
 import qualified Data.List as L
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Strict as M
+import qualified Data.Primitive as P
 import qualified Data.Primitive.Contiguous as C
+import qualified Data.Semigroup as SG
 import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
-import qualified Data.Semigroup as SG
 import qualified GHC.Exts as E
 
 -- TODO: Minimize DFST using Choffrut's algorithm as described in
@@ -62,6 +66,25 @@ import qualified GHC.Exts as E
 --   Theoret. Comp. Sci. 292 (2003), 131–143.
 -- This would give us a meaningful Eq instance, which would let us
 -- do better property-testing on DFST.
+
+-- | The number of states. The name _order_ comes from graph theory,
+-- where the order of a graph is the cardinality of the set of vertices.
+order :: Dfsa t -> Int
+order (Dfsa t _) = P.sizeofArray t
+
+-- | The number of transitions. The name _size_ comes from graph theory,
+-- where the size of a graph is the cardinality of the set of edges. Be
+-- careful when interpreting this number. There may be multiple transitions
+-- from one state to another when either of the following conditions are
+-- met:
+--
+-- * The range of input causing this transition is non-contiguous.
+-- * A transition has unequal outputs associated with two
+--   contiguous ranges that border one another.
+size :: Dfsa t -> Int
+size (Dfsa t _) = foldl'
+  ( \acc m -> acc + DM.size m
+  ) 0 t
 
 -- | Map over the output tokens.
 map :: Eq n => (m -> n) -> Dfst t m -> Dfst t n

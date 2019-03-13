@@ -28,11 +28,13 @@ module Automata.Internal
   , minimize
   , minimizeMapping
   , composeMapping
+  , composeMappingLimited
   ) where
 
 import Control.Applicative (liftA2)
 import Control.Monad (forM_,(<=<))
 import Control.Monad.ST (runST)
+import Control.Monad.Trans.Class (lift)
 import Data.Foldable (foldl',toList)
 import Data.Map (Map)
 import Data.Maybe (fromMaybe,isNothing,mapMaybe)
@@ -340,8 +342,17 @@ union :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
 union = compose (||)
 
 composeMapping :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> (Map (Int,Int) Int, Dfsa t)
-composeMapping combineFinalMembership (Dfsa t1 f1) (Dfsa t2 f2) = runST $ do
-  let Pairing oldToNew reversedOld n3 = compositionReachable t1 t2
+composeMapping combineFinalMembership d1@(Dfsa t1 f1) d2@(Dfsa t2 f2) =
+  let p = compositionReachable t1 t2
+   in composeMappingCommon combineFinalMembership d1 d2 p
+
+composeMappingLimited :: (Ord t, Bounded t, Enum t) => Int -> (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> Maybe (Map (Int,Int) Int, Dfsa t)
+composeMappingLimited !maxStates combineFinalMembership d1@(Dfsa t1 f1) d2@(Dfsa t2 f2) = do
+  p <- compositionReachableLimited maxStates t1 t2
+  Just (composeMappingCommon combineFinalMembership d1 d2 p)
+
+composeMappingCommon :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> Pairing -> (Map (Int,Int) Int, Dfsa t)
+composeMappingCommon combineFinalMembership (Dfsa t1 f1) (Dfsa t2 f2) (Pairing oldToNew reversedOld n3) = runST $ do
   m <- PM.newArray n3 errorThunkUnion
   let go !_ [] = return ()
       go !ix (statePair@(stateA,stateB) : xs) = do
@@ -351,13 +362,13 @@ composeMapping combineFinalMembership (Dfsa t1 f1) (Dfsa t2 f2) = runST $ do
   frozen <- PM.unsafeFreezeArray m
   let finals = SU.fromList (M.foldrWithKey (\(stateA,stateB) stateNew xs -> if combineFinalMembership (SU.member stateA f1) (SU.member stateB f2) then stateNew : xs else xs) [] oldToNew)
   let (secondMapping, r) = minimizeMapping frozen finals
-  return (M.map (\x -> fromMaybe (error "composeMapping: bad lookup") (M.lookup x secondMapping)) oldToNew, r)
+  return (M.map (\x -> fromMaybe (error "composeMappingCommon: bad lookup") (M.lookup x secondMapping)) oldToNew, r)
 
 compose :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> Dfsa t
 compose combineFinalMembership a b = snd (composeMapping combineFinalMembership a b)
 
 compositionReachable :: Ord t => Array (DM.Map t Int) -> Array (DM.Map t Int) -> Pairing
-compositionReachable a b = State.execState (go 0 0) (Pairing M.empty [] 0) where
+compositionReachable !a !b = State.execState (go 0 0) (Pairing M.empty [] 0) where
   !szA = PM.sizeofArray a
   !szB = PM.sizeofArray b
   go :: Int -> Int -> State.State Pairing ()
@@ -368,7 +379,25 @@ compositionReachable a b = State.execState (go 0 0) (Pairing M.empty [] 0) where
       Nothing -> do
         State.put (Pairing (M.insert (stateA,stateB) s m) ((stateA,stateB) : xs) (s + 1))
         DM.traverse_ (uncurry go) (DM.unionWith (,) (PM.indexArray a stateA) (PM.indexArray b stateB))
-    
+
+-- A variant of compositionReachable that aborts if the total number of
+-- reachable states ever exceeds a specified threshold.
+compositionReachableLimited :: Ord t => Int -> Array (DM.Map t Int) -> Array (DM.Map t Int) -> Maybe Pairing
+compositionReachableLimited !maxStates !a !b =
+  State.execStateT (go 0 0) (Pairing M.empty [] 0)
+  where
+  !szA = PM.sizeofArray a
+  !szB = PM.sizeofArray b
+  go :: Int -> Int -> State.StateT Pairing Maybe ()
+  go !stateA !stateB = do
+    Pairing m xs s <- State.get
+    if s < maxStates
+      then case M.lookup (stateA,stateB) m of
+        Just _ -> return ()
+        Nothing -> do
+          State.put (Pairing (M.insert (stateA,stateB) s m) ((stateA,stateB) : xs) (s + 1))
+          DM.traverse_ (uncurry go) (DM.unionWith (,) (PM.indexArray a stateA) (PM.indexArray b stateB))
+      else lift Nothing
 
 -- | Docs for this are at @Automata.Nfsa.union@.
 unionNfsa :: (Bounded t) => Nfsa t -> Nfsa t -> Nfsa t

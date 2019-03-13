@@ -14,6 +14,7 @@ module Automata.Dfst
   , evaluate
   , evaluateAscii
   , union
+  , boundedUnion
   , map
     -- ** Properties
   , order
@@ -36,17 +37,17 @@ module Automata.Dfst
 
 import Prelude hiding (map)
 
-import Automata.Internal (State(..),Dfsa(..),composeMapping)
+import Automata.Internal (State(..),Dfsa(..),composeMapping,composeMappingLimited)
 import Automata.Internal.Transducer (Dfst(..),MotionDfst(..),Edge(..),EdgeDest(..))
 import Control.Applicative (liftA2)
 import Control.Monad.ST (runST)
+import Data.ByteString (ByteString)
 import Data.Foldable (foldl',for_)
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
 import Data.Primitive (Array,indexArray,sizeofArray)
 import Data.Semigroup (Last(..))
 import Data.Set (Set)
-import Data.ByteString (ByteString)
 
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.List as L
@@ -110,13 +111,38 @@ rejection = Dfst (C.singleton (DM.pure (MotionDfst 0 mempty))) SU.empty
 --
 -- The new transducer can only accept input that either of the original
 -- two could accept. However, there is non-intuitive (but well-defined)
--- behavior the emerges. States that appear unequal can be combined by
+-- behavior that emerges. States that appear unequal can be combined by
 -- this function because of pass that discards output.
-union :: forall t m. (Ord t, Bounded t, Enum t, Monoid m) => Dfst t m -> Dfst t m -> Dfst t m
+union :: forall t m. (Ord t, Bounded t, Enum t, Monoid m)
+  => Dfst t m -> Dfst t m -> Dfst t m
 union a@(Dfst ax _) b@(Dfst bx _) =
-  let (mapping, Dfsa t0 f) = composeMapping (||) (unsafeToDfsa a) (unsafeToDfsa b)
-      -- The revMapping goes from a new state to all a-b old state pairs.
-      revMapping :: Map Int (Set (Int,Int))
+  let (mapping, dfsa) = composeMapping (||) (unsafeToDfsa a) (unsafeToDfsa b)
+   in unionCommon a b dfsa mapping 
+
+-- unions :: forall t m. (Ord t, Bounded t, Enum t, Monoid m, Foldable f)
+--   => f (Dfst t m) -> Dfst t m
+-- unions
+
+-- | Variant of 'union' that accepts an upper bound on the number
+-- of states to consider.
+boundedUnion :: forall t m. (Ord t, Bounded t, Enum t, Monoid m)
+  => Int -- ^ Upper bound on number of states
+  -> Dfst t m
+  -> Dfst t m
+  -> Maybe (Dfst t m)
+boundedUnion !maxStates a b = do
+  (mapping, dfsa) <- composeMappingLimited maxStates (||) (unsafeToDfsa a) (unsafeToDfsa b)
+  Just (unionCommon a b dfsa mapping)
+
+unionCommon :: forall t m. (Ord t, Bounded t, Enum t, Monoid m)
+  => Dfst t m
+  -> Dfst t m
+  -> Dfsa t
+  -> Map (Int,Int) Int
+  -> Dfst t m
+unionCommon (Dfst ax _) (Dfst bx _) (Dfsa t0 f) mapping =
+  -- The revMapping goes from a new state to all a-b old state pairs.
+  let revMapping :: Map Int (Set (Int,Int))
       revMapping = M.foldlWithKey' (\acc k v -> M.insertWith (<>) v (S.singleton k) acc) M.empty mapping
       t1 :: Array (DM.Map t (MotionDfst m))
       t1 = C.imap

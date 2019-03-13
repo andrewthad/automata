@@ -17,8 +17,8 @@ module Automata.Dfst
   , boundedUnion
   , map
     -- ** Properties
-  , order
-  , size
+  , states
+  , transitions
     -- ** Special Transducers
   , rejection
     -- * Builder
@@ -68,22 +68,21 @@ import qualified GHC.Exts as E
 -- This would give us a meaningful Eq instance, which would let us
 -- do better property-testing on DFST.
 
--- | The number of states. The name _order_ comes from graph theory,
--- where the order of a graph is the cardinality of the set of vertices.
-order :: Dfsa t -> Int
-order (Dfsa t _) = P.sizeofArray t
+-- | The number of states, also known as the _order_ of the graph
+-- corresponding to the transducer.
+states :: Dfsa t -> Int
+states (Dfsa t _) = P.sizeofArray t
 
--- | The number of transitions. The name _size_ comes from graph theory,
--- where the size of a graph is the cardinality of the set of edges. Be
--- careful when interpreting this number. There may be multiple transitions
--- from one state to another when either of the following conditions are
--- met:
+-- | The number of transitions, also known as the _size_ of the graph
+-- corresponding to the automaton. Be careful when interpreting this
+-- number. There may be multiple transitions from one state to another
+-- when either of the following conditions are met:
 --
 -- * The range of input causing this transition is non-contiguous.
 -- * A transition has unequal outputs associated with two
 --   contiguous ranges that border one another.
-size :: Dfsa t -> Int
-size (Dfsa t _) = foldl'
+transitions :: Dfsa t -> Int
+transitions (Dfsa t _) = foldl'
   ( \acc m -> acc + DM.size m
   ) 0 t
 
@@ -166,10 +165,10 @@ unionCommon (Dfst ax _) (Dfst bx _) (Dfsa t0 f) mapping =
 --   accepting state. Returns @Just@ if it did. The array of
 --   output tokens always matches the length of the input.
 evaluate :: (Foldable f, Ord t) => Dfst t m -> f t -> Maybe (Array m)
-evaluate (Dfst transitions finals) tokens =
+evaluate (Dfst theTransitions finals) tokens =
   let !(!finalState,!totalSize,!allOutput) = foldl'
         (\(!active,!sz,!output) token ->
-          let MotionDfst nextState outputToken = DM.lookup token (indexArray transitions active)
+          let MotionDfst nextState outputToken = DM.lookup token (indexArray theTransitions active)
            in (nextState,sz + 1,outputToken : output)
         ) (0,0,[]) tokens
    in if SU.member finalState finals
@@ -177,10 +176,10 @@ evaluate (Dfst transitions finals) tokens =
         else Nothing
 
 evaluateAscii :: forall m. Ord m => Dfst Char m -> ByteString -> Maybe (Array m)
-evaluateAscii (Dfst transitions finals) !tokens =
+evaluateAscii (Dfst theTransitions finals) !tokens =
   let !(!finalState,!allOutput) = BC.foldl'
         (\(!active,!output) token ->
-          let MotionDfst nextState outputToken = DM.lookup token (indexArray transitions active)
+          let MotionDfst nextState outputToken = DM.lookup token (indexArray theTransitions active)
            in (nextState,outputToken : output)
         ) (0,[]) tokens
    in if SU.member finalState finals
@@ -261,14 +260,14 @@ internalBuild :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
   => Int -> [Edge t m] -> [Int] -> Int -> Dfst t m
 internalBuild totalStates edges final def = 
   let ts0 = runST $ do
-        transitions <- C.replicateM totalStates (DM.pure Nothing)
+        theTransitions <- C.replicateM totalStates (DM.pure Nothing)
         outbounds <- C.replicateM totalStates []
         for_ edges $ \(Edge source destination lo hi output) -> do
           edgeDests0 <- C.read outbounds source
           let !edgeDests1 = EdgeDest destination lo hi output : edgeDests0
           C.write outbounds source edgeDests1
         (outbounds' :: Array [EdgeDest t m]) <- C.unsafeFreeze outbounds
-        flip C.imapMutable' transitions $ \i _ -> 
+        flip C.imapMutable' theTransitions $ \i _ -> 
           let dests = C.index outbounds' i
            in mconcat
                 ( L.map
@@ -277,7 +276,7 @@ internalBuild totalStates edges final def =
                   )
                   dests
                 )
-        C.unsafeFreeze transitions
+        C.unsafeFreeze theTransitions
    in Dfst (fmap (DM.map (maybe (MotionDfst def mempty) getLast)) ts0) (SU.fromList final)
 
 -- collapse :: Dfst t m -> Dfst t m

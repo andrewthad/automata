@@ -24,6 +24,28 @@ import qualified Data.Set.Unboxed as SU
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Lifted.Unlifted as MLN
 
+-- | An artifact built from a DFST that performs a form of
+-- run-length compression to transitions. Consider the DFST
+-- over input alphabet @{a,b,c,d}@ with output alphabet
+-- @{A,B,C,D}@. The start state is 00:
+--
+-- > 00 --a/A-> 01 --b/C-> 02 --c/C-> 03 --b/C-+
+-- >   \                                        \
+-- >    +-b/B-> 04 --c/D-> 05 --d/D-> 06 --b/B-> 07
+-- 
+-- All unspecified transitions go to state 08 (not shown in
+-- the ascii art) with output A. The 'CompactDsft' type
+-- would compress states 01-02-03 and states 04-05:
+--
+-- > 00 --a/A-> 01 --bcb/C-----------+
+-- >   \                              \
+-- >    +-b/B-> 04 --cd/D-> 06 --b/B-> 07
+--
+-- All unspecified transitions still go to state 08. Additionally,
+-- states with an outgoing RLE transition sequence can transition
+-- to 08 if the input string they expect is not fully matched.
+-- These RLE transition sequences produce their output token
+-- once for every token that is consumed.
 data CompactDfst t m = CompactDfst
   { compactDfstTransition :: !(Array (TransitionCompactDfst t m))
   , compactDfstFinal :: !(SU.Set Int)

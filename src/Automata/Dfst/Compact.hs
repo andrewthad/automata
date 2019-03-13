@@ -7,15 +7,16 @@
 {-# language UnboxedTuples #-}
 
 module Automata.Dfst.Compact
-  ( -- * Static
-    -- ** Types
+  ( -- * Types
     CompactDfst
   , Indexed(..)
   , Ranged(..)
-    -- ** Functions
+    -- * Functions
   , compact
   , evaluateList
   , toDot
+    -- * Properties
+  , states
   ) where
 
 import Prelude hiding (map)
@@ -37,17 +38,17 @@ import Data.Monoid (Sum(..))
 import Data.Foldable (foldlM)
 import Control.Monad.Trans.State.Strict (get,put,runState)
 
-import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Char8 as BC
+import qualified Data.DisjointMap as DJM
 import qualified Data.List as L
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Strict as M
+import qualified Data.Primitive as P
+import qualified Data.Primitive as PM
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
-import qualified Data.Primitive as PM
 import qualified GHC.Exts as E
-import qualified Data.DisjointMap as DJM
 
 data Indexed m = Indexed !Int m
 data Ranged m = Ranged
@@ -63,6 +64,13 @@ instance (Ord k, Semigroup v) => Semigroup (M k v) where
 
 instance (Ord k, Semigroup v) => Monoid (M k v) where
   mempty = M M.empty
+
+-- | The number of states. Since a 'CompactDfst' is not backed
+-- by a true graph (rather, a graph-like structure), this
+-- number lacks a good theoretical foundation, but it is still
+-- a useful approximation of the size.
+states :: CompactDfst t m -> Int
+states (CompactDfst t _) = P.sizeofArray t
 
 -- Implementation of compact: We figure out how we want to map old
 -- states to new states. Then, we perform the substitution, deleting

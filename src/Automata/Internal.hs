@@ -33,15 +33,17 @@ module Automata.Internal
 
 import Control.Applicative (liftA2)
 import Control.Monad (forM_,(<=<))
-import Control.Monad.ST (runST)
+import Control.Monad.ST (ST,runST)
 import Control.Monad.Trans.Class (lift)
 import Data.Foldable (foldl',toList)
 import Data.Map (Map)
+import Data.Primitive (MutablePrimArray,MutableArray)
 import Data.Maybe (fromMaybe,isNothing,mapMaybe)
 import Data.Primitive (Array,indexArray)
 import Data.Semigroup (First(..))
 import Data.Semiring (Semiring)
 import Data.Set (Set)
+import Data.STRef (STRef,newSTRef,readSTRef,writeSTRef)
 
 import Debug.Trace
 
@@ -51,12 +53,12 @@ import qualified Data.Set.Unboxed as SU
 import qualified Data.Map.Strict as M
 import qualified Control.Monad.Trans.State.Strict as State
 import qualified Data.Map.Interval.DBTSLL as DM
-import qualified Data.Map.Unboxed.Lifted as MUL
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Primitive as PM
 import qualified Data.Map.Lifted.Lifted as MLL
 import qualified GHC.Exts as E
 import qualified Data.Semiring
+import qualified Data.Primitive as PM
 
 -- | Deterministic Finite State Automaton.
 --
@@ -106,7 +108,7 @@ data TransitionNfsa t = TransitionNfsa
   } deriving (Eq,Show)
 
 data Conversion = Conversion
-  { conversionLabel :: !Int
+  { _conversionLabel :: !Int
     -- The state identifier to be assigned to the next state.
   , conversionResolutions :: !(Map (SU.Set Int) Int)
     -- The map from subsets of states to new state identifiers.
@@ -120,9 +122,9 @@ data Conversion = Conversion
   }
 
 data Pairing = Pairing
-  { pairingMap :: !(Map (Int,Int) Int)
-  , pairingReversedOld :: ![(Int,Int)]
-  , pairingState :: !Int
+  { _pairingMap :: !(Map (Int,Int) Int)
+  , _pairingReversedOld :: ![(Int,Int)]
+  , _pairingState :: !Int
   }
 
 append :: Nfsa t -> Nfsa t -> Nfsa t
@@ -281,10 +283,10 @@ minimizeMapping t0 f0 =
   go :: Set (Set Int) -> Set (Set Int) -> Set (Set Int)
   go !p1 !w1 = case S.minView w1 of
     Nothing -> p1
-    Just (a,w2) ->
-      let (p2,w3) = DM.foldl'
-            (\(p3,w4) m ->
-              let x = foldMap (\s -> fromMaybe S.empty (MLL.lookup s m)) a
+    Just (!a,!w2) ->
+      let (!p2,!w3) = DM.foldl'
+            (\(!p3,!w4) !m ->
+              let !x = foldMap (\s -> fromMaybe S.empty (MLL.lookup s m)) a
                in foldl'
                     (\(p4, w5) y ->
                       let diffYX = S.difference y x
@@ -331,12 +333,6 @@ deletePredicate p (y:ys) = if p y then deletePredicate p ys else y : deletePredi
 intersection :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
 intersection = compose (&&)
 
--- Adjusts all the values in the first interval map by multiplying
--- them by the number of states in the second automaton. Then,
--- adds these to the states numbers from the second automaton
-scoot :: Ord t => Int -> DM.Map t Int -> DM.Map t Int -> DM.Map t Int
-scoot n2 d1 d2 = DM.unionWith (\s1 s2 -> n2 * s1 + s2) d1 d2
-
 {-# NOINLINE errorThunkUnion #-}
 errorThunkUnion :: a
 errorThunkUnion = error "Automata.Dfsa.union: slot not filled"
@@ -347,12 +343,12 @@ union :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Dfsa t
 union = compose (||)
 
 composeMapping :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> (Map (Int,Int) Int, Dfsa t)
-composeMapping combineFinalMembership d1@(Dfsa t1 f1) d2@(Dfsa t2 f2) =
+composeMapping combineFinalMembership d1@(Dfsa t1 _) d2@(Dfsa t2 _) =
   let p = compositionReachable t1 t2
    in composeMappingCommon combineFinalMembership d1 d2 p
 
 composeMappingLimited :: (Ord t, Bounded t, Enum t) => Int -> (Bool -> Bool -> Bool) -> Dfsa t -> Dfsa t -> Maybe (Map (Int,Int) Int, Dfsa t)
-composeMappingLimited !maxStates combineFinalMembership d1@(Dfsa t1 f1) d2@(Dfsa t2 f2) = do
+composeMappingLimited !maxStates combineFinalMembership d1@(Dfsa t1 _) d2@(Dfsa t2 _) = do
   p <- compositionReachableLimited maxStates t1 t2
   Just (composeMappingCommon combineFinalMembership d1 d2 p)
 
@@ -360,7 +356,7 @@ composeMappingCommon :: (Ord t, Bounded t, Enum t) => (Bool -> Bool -> Bool) -> 
 composeMappingCommon combineFinalMembership (Dfsa t1 f1) (Dfsa t2 f2) (Pairing oldToNew reversedOld n3) = runST $ do
   m <- PM.newArray n3 errorThunkUnion
   let go !_ [] = return ()
-      go !ix (statePair@(stateA,stateB) : xs) = do
+      go !ix ((stateA,stateB) : xs) = do
         PM.writeArray m ix (DM.unionWith (\x y -> fromMaybe (error "Automata.Dfsa.union: could not find pair in oldToNew") (M.lookup (x,y) oldToNew)) (PM.indexArray t1 stateA) (PM.indexArray t2 stateB))
         go (ix - 1) xs
   go (n3 - 1) reversedOld
@@ -374,8 +370,6 @@ compose combineFinalMembership a b = snd (composeMapping combineFinalMembership 
 
 compositionReachable :: Ord t => Array (DM.Map t Int) -> Array (DM.Map t Int) -> Pairing
 compositionReachable !a !b = State.execState (go 0 0) (Pairing M.empty [] 0) where
-  !szA = PM.sizeofArray a
-  !szB = PM.sizeofArray b
   go :: Int -> Int -> State.State Pairing ()
   go !stateA !stateB = do
     Pairing m xs s <- State.get
@@ -391,8 +385,6 @@ compositionReachableLimited :: Ord t => Int -> Array (DM.Map t Int) -> Array (DM
 compositionReachableLimited !maxStates !a !b =
   State.execStateT (go 0 0) (Pairing M.empty [] 0)
   where
-  !szA = PM.sizeofArray a
-  !szB = PM.sizeofArray b
   go :: Int -> Int -> State.StateT Pairing Maybe ()
   go !stateA !stateB = do
     Pairing m xs s <- State.get
@@ -408,11 +400,14 @@ compositionReachableLimited !maxStates !a !b =
 unionNfsa :: (Bounded t) => Nfsa t -> Nfsa t -> Nfsa t
 unionNfsa (Nfsa t1 f1) (Nfsa t2 f2) = Nfsa
   ( runST $ do
+      -- This replicated transition metadata only ends up being
+      -- the transition for the start state. At all other indices,
+      -- the value is overridden.
       m <- C.replicateM (n1 + n2 + 1)
         ( TransitionNfsa
           (mconcat
             [ SU.mapMonotonic (+1) (transitionNfsaEpsilon (C.index t1 0))
-            , SU.mapMonotonic (\x -> 1 + n1) (transitionNfsaEpsilon (C.index t2 0))
+            , SU.mapMonotonic (\x -> 1 + n1 + x) (transitionNfsaEpsilon (C.index t2 0))
             , SU.tripleton 0 1 (1 + n1)
             ]
           )
@@ -475,3 +470,106 @@ instance (Bounded t) => Semiring (Nfsa t) where
 data Epsilon = Epsilon !Int !Int
 
 newtype State s = State Int
+
+data Partition s = Partition
+  !Int -- identifier, these are produced from a monotonically increasing source
+  !(STRef s (Metadata s))
+
+data Metadata s = Metadata
+  !Int -- Current size of the partition
+  !(MutablePrimArray s Int) -- Elements in the partition
+
+-- A partitioning of contiguous machine integers
+data Partitions s = Partitions
+  !(MutablePrimArray s Int) -- singleton array with next partition identifier
+  !(STRef s [Partition s])
+  -- All of the partitions. On the wikipedia page for partition refinement,
+  -- it claims that this needs to support cheap insertion into the middle
+  -- of the array. However, I do not believe this is true. It should be
+  -- fine to always cons onto the front of the list.
+  !(MutableArray s (Partition s)) -- Map from element to set identifier
+  !(MutablePrimArray s Int)
+  -- Map from element to index in partition. This is only meaningful
+  -- when you already know the partition that the element is in.
+
+-- This starts out with just one big partition.
+newPartitions :: Int -> ST s (Partitions s, Partition s)
+newPartitions !total = do
+  counter <- PM.newPrimArray 1
+  PM.writePrimArray counter 0 (1 :: Int)
+  let go !ix !arr = if ix >= 0
+        then do
+          PM.writePrimArray arr ix ix
+          go (ix - 1) arr
+        else pure ()
+  allElements <- PM.newPrimArray total
+  go (total - 1) allElements
+  elementToIndex <- PM.newPrimArray total
+  go (total - 1) elementToIndex
+  meta0 <- newSTRef (Metadata total allElements)
+  let p0 = Partition 0 meta0
+  partitionList <- newSTRef [p0]
+  elementToPartition <- PM.newArray total p0
+  pure (Partitions counter partitionList elementToPartition elementToIndex, p0)
+  
+-- In the returned tuples, the first element is the already-existing partition
+-- (which may have shrunk) and the second element is the newly-created partition.
+splitPartitions :: forall s. Partitions s -> SU.Set Int -> ST s [(Partition s,Partition s)]
+splitPartitions (Partitions counter partitionList elementToPartition elementToIndex) distinction = do
+  c0 <- PM.readPrimArray counter 0
+  partitionListA <- readSTRef partitionList
+  (partitionListB, updatedPartitionPairs, c1) <- go c0 partitionListA [] M.empty (SU.toList distinction)
+  PM.writePrimArray counter 0 c1
+  writeSTRef partitionList partitionListB
+  pure updatedPartitionPairs
+  where
+  -- Invariant: the keys of the recend partition map must match the
+  -- partition identifiers in the values.
+  go :: Int -> [Partition s] -> [(Partition s, Partition s)] -> Map Int (Partition s) -> [Int] -> ST s ([Partition s],[(Partition s, Partition s)],Int)
+  go !cntr !plist !pnew !_ [] = pure (plist,pnew,cntr)
+  go !cntr !plist !pnew !recent (x : xs) = do
+    poriginal@(Partition pnum mreforiginal) <- PM.readArray elementToPartition x
+    -- Remove the element from the original partition. To do
+    -- this, we must look up its position, move the last element
+    -- in the partition into this position and then update the
+    -- position of what was previously the last element. 
+    Metadata origSz origElems <- readSTRef mreforiginal
+    origLast <- PM.readPrimArray origElems (origSz - 1)
+    origIx <- PM.readPrimArray elementToIndex x
+    PM.writePrimArray origElems origIx origLast
+    PM.writePrimArray elementToIndex origLast origIx
+    writeSTRef mreforiginal $! Metadata (origSz - 1) origElems
+    case M.lookup pnum recent of
+      Nothing -> do
+        pelems <- PM.newPrimArray 1
+        PM.writePrimArray pelems 0 x
+        let m = Metadata 1 pelems
+        mref <- newSTRef m
+        let !p = Partition cntr mref
+        -- Add the element to the new partition. It was removed
+        -- earlier before the case statement.
+        PM.writeArray elementToPartition x p
+        PM.writePrimArray elementToIndex x 0
+        go (cntr + 1) (p : plist) ((poriginal,p) : pnew) (M.insert pnum p recent) xs
+      Just myPartition@(Partition _ metaref) -> do
+        Metadata sz buf <- readSTRef metaref
+        bufSz <- PM.getSizeofMutablePrimArray buf
+        PM.writeArray elementToPartition x myPartition
+        PM.writePrimArray elementToIndex x bufSz
+        if bufSz < sz
+          then do
+            PM.writePrimArray buf bufSz x
+            writeSTRef metaref $! Metadata (sz + 1) buf
+          else do
+            let newBufSz = bufSz * 2
+            newBuf <- PM.newPrimArray newBufSz
+            -- intentionally using the old buffer size as the index
+            PM.writePrimArray newBuf bufSz x
+            writeSTRef metaref $! Metadata (sz + 1) newBuf
+        go cntr plist pnew recent xs
+
+partitionCardinality :: Partition s -> ST s Int
+partitionCardinality (Partition _ r) = do
+  Metadata card _ <- readSTRef r
+  pure card
+

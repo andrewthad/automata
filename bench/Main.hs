@@ -14,6 +14,10 @@ main = defaultMain
       [ bgroup "identical"
         [ bench "10" (whnf (\x -> Dfsa.union x x) dfsa1_10)
         , bench "20" (whnf (\x -> Dfsa.union x x) dfsa1_20)
+        , bench "40" (whnf (\x -> Dfsa.union x x) dfsa1_40)
+        , bench "80" (whnf (\x -> Dfsa.union x x) dfsa1_80)
+        , bench "160" (whnf (\x -> Dfsa.union x x) dfsa1_160)
+        , bench "320" (whnf (\x -> Dfsa.union x x) dfsa1_320)
         ]
       , bgroup "disjoint-start"
         [ bench "10" (whnf (\x -> Dfsa.union dfsa2_10 x) dfsa1_10)
@@ -24,6 +28,10 @@ main = defaultMain
         , bench "10" (whnf (\x -> Dfsa.union dfsa3_10 x) dfsa1_10)
         , bench "20" (whnf (\x -> Dfsa.union dfsa3_20 x) dfsa1_20)
         , bench "40" (whnf (\x -> Dfsa.union dfsa3_40 x) dfsa1_40)
+        , bench "80" (whnf (\x -> Dfsa.union dfsa3_80 x) dfsa1_80)
+        , bench "160" (whnf (\x -> Dfsa.union dfsa3_160 x) dfsa1_160)
+        , bench "320" (whnf (\x -> Dfsa.union dfsa3_320 x) dfsa1_320)
+        , bench "640" (whnf (\x -> Dfsa.union dfsa3_640 x) dfsa1_640)
         ]
       , bgroup "disjoint-throughout"
         [ bench "10" (whnf (\x -> Dfsa.union dfsa4_10 x) dfsa1_10)
@@ -49,6 +57,18 @@ dfsa1_20 = Dfsa.buildDefaulted (dfsaBuilder1 20)
 dfsa1_40 :: Dfsa D
 dfsa1_40 = Dfsa.buildDefaulted (dfsaBuilder1 40)
 
+dfsa1_80 :: Dfsa D
+dfsa1_80 = Dfsa.buildDefaulted (dfsaBuilder1 80)
+
+dfsa1_160 :: Dfsa D
+dfsa1_160 = Dfsa.buildDefaulted (dfsaBuilder1 160)
+
+dfsa1_320 :: Dfsa D
+dfsa1_320 = Dfsa.buildDefaulted (dfsaBuilder1 320)
+
+dfsa1_640 :: Dfsa D
+dfsa1_640 = Dfsa.buildDefaulted (dfsaBuilder1 640)
+
 dfsa2_10 :: Dfsa D
 dfsa2_10 = Dfsa.buildDefaulted (dfsaBuilder2 10)
 
@@ -66,6 +86,18 @@ dfsa3_20 = Dfsa.buildDefaulted (dfsaBuilder3 20)
 
 dfsa3_40 :: Dfsa D
 dfsa3_40 = Dfsa.buildDefaulted (dfsaBuilder3 40)
+
+dfsa3_80 :: Dfsa D
+dfsa3_80 = Dfsa.buildDefaulted (dfsaBuilder3 80)
+
+dfsa3_160 :: Dfsa D
+dfsa3_160 = Dfsa.buildDefaulted (dfsaBuilder3 160)
+
+dfsa3_320 :: Dfsa D
+dfsa3_320 = Dfsa.buildDefaulted (dfsaBuilder3 320)
+
+dfsa3_640 :: Dfsa D
+dfsa3_640 = Dfsa.buildDefaulted (dfsaBuilder3 640)
 
 dfsa4_10 :: Dfsa D
 dfsa4_10 = Dfsa.buildDefaulted (dfsaBuilder4 10)

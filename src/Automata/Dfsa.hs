@@ -137,18 +137,18 @@ build fromStartState =
 --   transition does not cover every token. With 'build', the start state
 --   is used for this, but it is often desirable to have a different state
 --   for this purpose.
-buildDefaulted :: forall t m a. (Bounded t, Ord t, Enum t)
+buildDefaulted :: forall t a. (Bounded t, Ord t, Enum t)
   => (forall s. State s -> State s -> Builder t s a)
   -> Dfsa t
 buildDefaulted fromStartAndDefault =
-  case do { (start, def) <- liftA2 (,) state state; fromStartAndDefault start def; pure def;} of
+  case do { (start, def) <- liftA2 (,) state state; _ <- fromStartAndDefault start def; pure def;} of
     Builder f -> case f 0 [] [] of
       Result totalStates edges final (State def) ->
         internalBuild totalStates edges final def
 
 -- | The argument function takes a start state and builds an NFA. This
 -- function will execute the builder.
-internalBuild :: forall t a. (Bounded t, Ord t, Enum t)
+internalBuild :: forall t. (Bounded t, Ord t, Enum t)
   => Int -> [Edge t] -> [Int] -> Int -> Dfsa t
 internalBuild totalStates edges final def =
   let ts = runST $ do

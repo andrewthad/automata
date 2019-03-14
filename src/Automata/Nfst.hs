@@ -35,14 +35,12 @@ import Automata.Internal (State(..),Epsilon(..),Nfsa(..),Dfsa(..),TransitionNfsa
 import Automata.Internal.Transducer (Nfst(..),Dfst(..),TransitionNfst(..),MotionDfst(..),Edge(..),EdgeDest(..),epsilonClosure,rejection,union)
 import Control.Monad.ST (runST)
 import Data.ByteString (ByteString)
-import Data.Foldable (for_,fold)
+import Data.Foldable (for_)
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (Any(..))
 import Data.Primitive (Array,indexArray)
 import Data.Set (Set)
-
-import Debug.Trace
 
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.Map.Strict as M
@@ -71,10 +69,10 @@ evaluate (Nfst transitions finals) tokens = S.unions $ M.elems $ M.filterWithKey
   where
   step :: Map Int (Set [m]) -> t -> Map Int (Set [m])
   step active token = M.unionsWith (<>) $ M.foldlWithKey'
-    ( \xs state outputSets -> MLN.foldlWithKey'
+    ( \xs theState outputSets -> MLN.foldlWithKey'
         (\zs outputTokenNext nextStates -> M.unionsWith (<>) (map (\s -> M.singleton s (S.mapMonotonic (outputTokenNext:) outputSets)) (SU.toList nextStates)) : zs)
         xs
-        (DM.lookup token (transitionNfstConsume (C.index transitions state)))
+        (DM.lookup token (transitionNfstConsume (C.index transitions theState)))
     ) [] active
 
 evaluateAscii :: forall m. Ord m => Nfst Char m -> ByteString -> Set [m]
@@ -84,10 +82,10 @@ evaluateAscii (Nfst transitions finals) tokens = S.unions $ M.elems $ M.filterWi
   where
   step :: Map Int (Set [m]) -> Char -> Map Int (Set [m])
   step active token = M.unionsWith (<>) $ M.foldlWithKey'
-    ( \xs state outputSets -> MLN.foldlWithKey'
+    ( \xs theState outputSets -> MLN.foldlWithKey'
         (\zs outputTokenNext nextStates -> M.unionsWith (<>) (map (\s -> M.singleton s (S.mapMonotonic (outputTokenNext:) outputSets)) (SU.toList nextStates)) : zs)
         xs
-        (DM.lookup token (transitionNfstConsume (C.index transitions state)))
+        (DM.lookup token (transitionNfstConsume (C.index transitions theState)))
     ) [] active
 
 -- | Convert an NFST to a DFST that accepts the same input and produces

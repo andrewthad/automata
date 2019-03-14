@@ -9,6 +9,7 @@ module Automata.Nfsa
     Nfsa
     -- * Conversion
   , toDfsa
+  , fromDfsa
     -- * Evaluation
   , evaluate
     -- * Composition
@@ -26,18 +27,13 @@ import Data.Set (Set)
 import Data.Map (Map)
 import Control.Monad.ST (runST)
 import Data.Primitive (Array,indexArray)
-import Control.Monad (forM_)
 import Data.Foldable (foldl')
 
 import qualified Automata.Internal as AI
-import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
-import qualified Data.Map.Strict as M
-import qualified Control.Monad.Trans.State.Strict as State
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Unboxed.Lifted as MUL
 import qualified Data.Primitive.Contiguous as C
-import qualified Data.Primitive as PM
 
 fromDfsa :: Dfsa t -> Nfsa t
 fromDfsa (Dfsa t f) =

@@ -280,7 +280,7 @@ minimizeMapping t0 f0 =
   -- The implementation of go closely mirrors the Hopcroft's Algorithm psuedocode
   -- from Wikipedia: https://en.wikipedia.org/wiki/DFA_minimization#Hopcroft's_algorithm
   {-# SCC go #-}
-  go :: Set (Set Int) -> Set (Set Int) -> Set (Set Int)
+  go :: forall s. Partitions s -> Set (Partition s) -> ST s (Set (Set Int))
   go !p1 !w1 = case S.minView w1 of
     Nothing -> p1
     Just (!a,!w2) ->
@@ -491,6 +491,10 @@ data Partitions s = Partitions
   !(MutablePrimArray s Int)
   -- Map from element to index in partition. This is only meaningful
   -- when you already know the partition that the element is in.
+
+finishPartitions :: Partitions s -> ST s (Set (Set Int))
+finishPartitions (Partitions _ ps _ _) = do
+  
 
 -- This starts out with just one big partition.
 newPartitions :: Int -> ST s (Partitions s, Partition s)

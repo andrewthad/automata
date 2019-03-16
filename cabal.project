@@ -1,5 +1,20 @@
 packages: .
 
+source-repository-package
+  type: git
+  location: https://github.com/andrewthad/contiguous
+  tag: 06080b21ecf97bd02bbd6f5149ad5d86cf9a4eda
+
+source-repository-package
+  type: git
+  location: https://github.com/andrewthad/primitive-containers
+  tag: 0edc20256f779a913c281f2a20718504e4d066f5
+
+source-repository-package
+  type: git
+  location: https://github.com/andrewthad/disjoint-containers
+  tag: 13605b0405dd5eb537f5a245044ca280ce1729bf
+
 package semirings
   flags: -hashable -containers -unordered-containers -vector
 

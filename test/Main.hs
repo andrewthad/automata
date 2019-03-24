@@ -8,7 +8,7 @@ import Automata.Nfsa (Nfsa)
 import Automata.Nfst (Nfst)
 import Automata.Dfst.Compact (Ranged(..))
 import Control.Monad (forM_,replicateM)
-import Data.Enum.Types (A(..),B(..),D(..),E(..))
+import Data.Enum.Types (A(..),B(..),C(..),D(..),E(..))
 import Data.Monoid (All(..))
 import Data.Primitive (Array)
 import Data.Proxy (Proxy(..))
@@ -93,14 +93,15 @@ tests = testGroup "Automata"
         , TL.testProperty "6" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex6) [a,b,c,d] == Nfsa.evaluate ex6 [a,b,c,d]
         , TL.testProperty "7" $ \(a,b,c,d) -> Dfsa.evaluate (Nfsa.toDfsa ex7) [a,b,c,d] == Nfsa.evaluate ex7 [a,b,c,d]
         ]
-      , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Nfsa D)))
-      -- , testGroup "compact"
-      --   [ testCase "A"
-      --   ]
       ]
+    , lawsToTest (QCC.semiringLaws (Proxy :: Proxy (Nfsa D)))
     ]
   , testGroup "Dfsa"
-    [ testGroup "evaluate"
+    [ testGroup "builder"
+      [ testCase "A" (exDfsa3 @?= exDfsa4)
+      , testCase "B" (assertBool "" (exDfsa5 /= Dfsa.acceptance))
+      ]
+    , testGroup "evaluate"
       [ testCase "A" (Dfsa.evaluate exDfsa1 [D1] @?= True)
       , testCase "B" (Dfsa.evaluate exDfsa1 [D3,D2,D1,D2,D0] @?= True)
       , testCase "C" (Dfsa.evaluate exDfsa2 [D3,D3] @?= False)
@@ -120,7 +121,10 @@ tests = testGroup "Automata"
         , testCase "H" (Dfsa.union (Nfsa.toDfsa ex1) (Nfsa.toDfsa ex1) @?= (Nfsa.toDfsa ex1))
         , testCase "I" (Dfsa.union (Nfsa.toDfsa ex3) (Nfsa.toDfsa ex3) @?= (Nfsa.toDfsa ex3))
         ]
-      , TL.testProperty "idempotent" $ \x -> let y = mkBinDfsa x in y == Dfsa.union y y
+      , testGroup "idempotent"
+        [ TL.testProperty "three" $ \x -> let y = mkLittleBinDfsa x in y == Dfsa.union y y
+        , TL.testProperty "four" $ \x -> let y = mkBinDfsa x in y == Dfsa.union y y
+        ]
       , testGroup "identity"
         [ TL.testProperty "left" $ \x -> let y = mkBinDfsa x in y == Dfsa.union Dfsa.rejection y
         , TL.testProperty "right" $ \x -> let y = mkBinDfsa x in y == Dfsa.union y Dfsa.rejection
@@ -348,6 +352,41 @@ exDfsa2 = Dfsa.build $ \s0 -> do
   Dfsa.transition D2 D2 s1 s2
   Dfsa.transition D3 D3 s2 s2
 
+exDfsa3 :: Dfsa D
+exDfsa3 = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  s2 <- Dfsa.state
+  s3 <- Dfsa.state
+  Dfsa.accept s1
+  Dfsa.transition D1 D2 s0 s2
+  Dfsa.transition D2 D3 s2 s1
+  Dfsa.transition D3 D3 s3 s3
+  Dfsa.transition D3 D3 s3 s3
+
+exDfsa4 :: Dfsa D
+exDfsa4 = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  s2 <- Dfsa.state
+  s3 <- Dfsa.state
+  Dfsa.accept s2
+  Dfsa.accept s3
+  Dfsa.transition D1 D1 s0 s1
+  Dfsa.transition D2 D2 s0 s1
+  Dfsa.transition D2 D2 s1 s2
+  Dfsa.transition D3 D3 s1 s2
+
+exDfsa5 :: Dfsa B
+exDfsa5 = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  s2 <- Dfsa.state
+  Dfsa.accept s2
+  Dfsa.transition B0 B0 s0 s0
+  Dfsa.transition B1 B1 s0 s1
+  Dfsa.transition B0 B0 s1 s0
+  Dfsa.transition B1 B1 s1 s2
+  Dfsa.transition B0 B0 s2 s2
+  Dfsa.transition B1 B1 s2 s0
+
 exNfst1 :: Nfst D B
 exNfst1 = Nfst.build $ \s0 -> do
   s1 <- Nfst.state
@@ -514,7 +553,7 @@ generateDfst1 (x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10) = Dfst.build $ \s0 -> do
   Dfst.transition A0 A0 x10 s3 s1
   
 -- This uses s3 as a dead state. So, we are roughly testing
--- all DFA with three nodes, a binary transition function,
+-- all DFA with four nodes, a binary transition function,
 -- and a single fixed end state.
 mkBinDfsa :: ((D,D),(D,D),(D,D)) -> Dfsa B
 mkBinDfsa (ws,xs,ys) = Dfsa.build $ \s0 -> do
@@ -535,5 +574,20 @@ mkBinDfsa (ws,xs,ys) = Dfsa.build $ \s0 -> do
   binTransitions ys s2
   Dfsa.transition B0 B1 s3 s3
 
-
-
+-- This does not have a designated dead state. It is
+-- used by tests that are exhaustive.
+mkLittleBinDfsa :: ((C,C),(C,C),(C,C)) -> Dfsa B
+mkLittleBinDfsa (ws,xs,ys) = Dfsa.build $ \s0 -> do
+  s1 <- Dfsa.state
+  s2 <- Dfsa.state
+  Dfsa.accept s1
+  let resolve = \case
+        C0 -> s0
+        C1 -> s1
+        C2 -> s2
+      binTransitions (a,b) s = do
+        Dfsa.transition B0 B0 s (resolve a)
+        Dfsa.transition B1 B1 s (resolve b)
+  binTransitions ws s0
+  binTransitions xs s1
+  binTransitions ys s2

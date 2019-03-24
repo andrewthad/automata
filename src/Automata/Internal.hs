@@ -29,6 +29,8 @@ module Automata.Internal
   , minimizeMapping
   , composeMapping
   , composeMappingLimited
+    --  * Testing
+  , ex1
   ) where
 
 import Control.Applicative (liftA2)
@@ -37,17 +39,19 @@ import Control.Monad.ST (ST,runST)
 import Control.Monad.Trans.Class (lift)
 import Data.Foldable (foldl',toList)
 import Data.Map (Map)
-import Data.Primitive (MutablePrimArray,MutableArray)
+import Data.Primitive (PrimArray,MutablePrimArray,MutableArray)
 import Data.Maybe (fromMaybe,isNothing,mapMaybe)
 import Data.Primitive (Array,indexArray)
 import Data.Semigroup (First(..))
 import Data.Semiring (Semiring)
 import Data.Set (Set)
 import Data.STRef (STRef,newSTRef,readSTRef,writeSTRef)
+import GHC.IO (unsafeIOToST)
 
 import Debug.Trace
 
 import qualified Data.List as L
+import qualified Data.Foldable as F
 import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
 import qualified Data.Map.Strict as M
@@ -230,33 +234,54 @@ minimize t0 f0 = snd (minimizeMapping t0 f0)
 --   state number to new state number. We need this mapping for a special
 --   NFST to DFST minimizer.
 minimizeMapping :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> (Map Int Int, Dfsa t)
-minimizeMapping t0 f0 =
-  let !partitions0 = go (S.fromList [f1,S.difference q0 f1]) (S.singleton f1)
-      -- We move the partition containing the start state to the front.
-      !partitions1 = case L.find (S.member 0) partitions0 of
-        Just startStates -> startStates : deletePredicate (\s -> S.member 0 s || S.null s) (S.toList partitions0)
-        Nothing -> error "Automata.Nfsa.minimize: incorrect"
-      -- Creates a map from old state to new state. This is not a bijection
-      -- since two old states may map to the same new state. However, we
-      -- may treat it as a bijection since at most one of the old states
-      -- is preserved.
-      assign :: Int -> Map Int Int -> [Set Int] -> Map Int Int
-      assign !_ !m [] = m
-      assign !ix !m (s : ss) = assign (ix + 1) (M.union (M.fromSet (const ix) s) m) ss
-      assignments = assign 0 M.empty partitions1
-      newTransitions0 = E.fromList (map (\s -> DM.map (\oldState -> fromMaybe (error "Automata.Nfsa.minimize: missing state") (M.lookup oldState assignments)) (PM.indexArray t1 (S.findMin s))) partitions1)
-      canonization = establishOrder newTransitions0
-      description = "[canonization=" ++ show canonization ++ "][assignments=" ++ show assignments ++ "]"
-      newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfsa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
-      newTransitions2 = runST $ do
-        marr <- C.replicateM (M.size canonization) (error ("Automata.Nfsa.minimize: uninitialized element " ++ description))
-        flip C.itraverse_ newTransitions1 $ \ix dm -> C.write marr (fromMaybe (error ("Automata.Nfsa.minimize: missing state while rearranging [state=" ++ show ix ++ "]" ++ description)) (M.lookup ix canonization)) dm
-        C.unsafeFreeze marr
-      newAcceptingStates = foldMap (maybe SU.empty SU.singleton . (flip M.lookup canonization <=< flip M.lookup assignments)) f1
-      finalCanonization = fmap (fromMaybe (error ("minimizeMapping: failed to connect the canons.\npartitions:\n" ++ show partitions1 ++ "\ninitial canon:\n" ++ show initialCanonization ++ "\nsecond canon:\n" ++ show canonization)) . (flip M.lookup canonization <=< flip M.lookup assignments)) initialCanonization
-   in (finalCanonization,Dfsa newTransitions2 newAcceptingStates)
+minimizeMapping t0 f0
+  | C.size t0 == 0 = error "Automata.Internal: tried to minimize DFSA with states"
+  | S.null f1 = 
+      -- When there are no final states, the solution is trivial. The DFSA
+      -- is equivalent to one with a single unaccepting state.
+      (M.fromSet (\_ -> 0) (S.fromList (enumFromTo 0 (C.size t0 - 1))),rejection)
+  | M.size initialCanonization == S.size f1 =
+      -- When all states are accepting, the solution is similarly trivial.
+      -- The DFSA is equivalent to one with a single accepting state.
+      (M.fromSet (\_ -> 0) (S.fromList (enumFromTo 0 (C.size t0 - 1))),acceptance)
+  | otherwise =
+      let !partitions0 = runST $ do
+             (ps,_) <- newPartitions (C.size t1)
+             -- This might behave incorrectly when either:
+             -- * There are no final states.
+             -- * All states are final states.
+             -- We guard against these cases elsewhere since they are
+             -- easy to check for.
+             splitPartitions ps (SU.fromList (S.toList f1)) >>= \case
+               [(_,p1)] -> go ps (S.singleton p1)
+               rs -> error ("Automata.Internal: initial split behaved unexpectedly [splits=" ++ show (length rs) ++ ",finals=" ++ show (S.size f1) ++ "]")
+          -- We move the partition containing the start state to the front.
+          !partitions1 = case L.find (S.member 0) partitions0 of
+            Just startStates ->
+              startStates : deletePredicate (\s -> S.member 0 s || S.null s) partitions0
+              -- startStates : deletePredicate (\s -> S.member 0 s || S.null s) (S.toList partitions0)
+            Nothing -> error "Automata.Nfsa.minimize: incorrect"
+          -- Creates a map from old state to new state. This is not a bijection
+          -- since two old states may map to the same new state. However, we
+          -- may treat it as a bijection since at most one of the old states
+          -- is preserved.
+          assign :: Int -> Map Int Int -> [Set Int] -> Map Int Int
+          assign !_ !m [] = m
+          assign !ix !m (s : ss) = assign (ix + 1) (M.union (M.fromSet (const ix) s) m) ss
+          assignments = assign 0 M.empty partitions1
+          newTransitions0 = E.fromList (map (\s -> DM.map (\oldState -> fromMaybe (error "Automata.Nfsa.minimize: missing state") (M.lookup oldState assignments)) (PM.indexArray t1 (S.findMin s))) partitions1)
+          canonization = establishOrder newTransitions0
+          description = "[original_state_cardinality=" ++ show (C.size t1) ++ "][new_transitions_cardinality=" ++ show (C.size newTransitions0) ++ "][inverted_transitions=" ++ show (DM.elems invertedTransitions) ++ "][initial_canonization=" ++ show initialCanonization ++ "][canonization=" ++ show canonization ++ "][assignments=" ++ show assignments ++ "][partitions=" ++ show partitions1 ++ "][new_transitions_0=" ++ show (fmap DM.elems newTransitions0) ++ "][t1=" ++ show (fmap DM.elems t1) ++ "]"
+          newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfsa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
+          newTransitions2 = runST $ do
+            marr <- C.replicateM (M.size canonization) (error ("Automata.Nfsa.minimize: uninitialized element " ++ description))
+            flip C.itraverse_ newTransitions1 $ \ix dm -> C.write marr (fromMaybe (error ("Automata.Nfsa.minimize: missing state while rearranging [state=" ++ show ix ++ "]" ++ description)) (M.lookup ix canonization)) dm
+            C.unsafeFreeze marr
+          newAcceptingStates = foldMap (maybe SU.empty SU.singleton . (flip M.lookup canonization <=< flip M.lookup assignments)) f1
+          finalCanonization = fmap (fromMaybe (error ("minimizeMapping: failed to connect the canons.\npartitions:\n" ++ show partitions1 ++ "\ninitial canon:\n" ++ show initialCanonization ++ "\nsecond canon:\n" ++ show canonization)) . (flip M.lookup canonization <=< flip M.lookup assignments)) initialCanonization
+       in (finalCanonization,Dfsa newTransitions2 newAcceptingStates)
   where
-  q0 = S.fromList (enumFromTo 0 (C.size t1 - 1))
+  -- q0 = S.fromList (enumFromTo 0 (C.size t1 - 1))
   f1 = S.fromList (mapMaybe (\x -> M.lookup x initialCanonization) (SU.toList f0))
   -- Do we actually need to canonize the states twice? Yes, we do.
   t1' :: Array (DM.Map t Int)
@@ -269,7 +294,10 @@ minimizeMapping t0 f0 =
     C.unsafeFreeze marr
   initialCanonization = establishOrder t0
   -- The inverted transitions has the destination state as well as
-  -- all source states that lead to it when the token is consumed. 
+  -- all source states that lead to it when the token is consumed.
+  -- This can lead to some pretty nasty constant factor overheads
+  -- when a large number of individual letters in an alphabet are
+  -- used. There may be a way to improve this.
   {-# SCC invertedTransitions #-}
   invertedTransitions :: DM.Map t (MLL.Map Int (Set Int))
   invertedTransitions = mconcat
@@ -279,31 +307,43 @@ minimizeMapping t0 f0 =
   -- can be replaced with any of the other states in the same equivalence class.
   -- The implementation of go closely mirrors the Hopcroft's Algorithm psuedocode
   -- from Wikipedia: https://en.wikipedia.org/wiki/DFA_minimization#Hopcroft's_algorithm
-  {-# SCC go #-}
-  go :: forall s. Partitions s -> Set (Partition s) -> ST s (Set (Set Int))
-  go !p1 !w1 = case S.minView w1 of
-    Nothing -> p1
-    Just (!a,!w2) ->
-      let (!p2,!w3) = DM.foldl'
-            (\(!p3,!w4) !m ->
-              let !x = foldMap (\s -> fromMaybe S.empty (MLL.lookup s m)) a
-               in foldl'
-                    (\(p4, w5) y ->
-                      let diffYX = S.difference y x
-                          intersectYX = S.intersection y x
-                       in if not (S.disjoint x y) && not (S.null diffYX)
-                            then
-                              ( S.insert diffYX (S.insert intersectYX (S.delete y p4))
-                              , if S.member y w5
-                                  then S.insert diffYX (S.insert intersectYX (S.delete y w5))
-                                  else if S.size intersectYX <= S.size diffYX
-                                    then S.insert intersectYX w5
-                                    else S.insert diffYX w5
-                              )
-                            else (S.insert y p4, w5)
-                    ) (S.empty, w4) p3
-            ) (p1,w2) invertedTransitions
-       in go p2 w3
+  go :: forall s. Partitions s -> Set (Partition s) -> ST s [Set Int]
+  go !p !w1 = case S.minView w1 of
+    Nothing -> do
+      traceST "finished with go"
+      finishPartitions p
+    Just (!a,!w2) -> do
+      traceST ("w2: " ++ show w2)
+      statesA <- partitionStates a
+      traceST ("considering partition " ++ show a ++ " with states " ++ show statesA)
+      !w3 <- DM.foldlM'
+        (\ !w4 !m -> do
+          let !x = C.foldMap (\s -> fromMaybe S.empty (MLL.lookup s m)) statesA
+          updates <- splitPartitions p (SU.fromList (S.toList x))
+          F.foldlM
+            (\ !w5 (!old,!new) -> do
+              traceST ("w5: " ++ show w5)
+              newCard <- partitionCardinality new
+              oldCard <- partitionCardinality old
+              pure $ if newCard == 0
+                then error "Automata.Internal: new cardinality should not be zero"
+                else if S.member old w5
+                  then if oldCard == 0
+                    then S.insert new (S.delete old w5)
+                    else S.insert new w5
+                  else if oldCard == 0
+                    then w5
+                    else if oldCard < newCard
+                      then S.insert old w5
+                      else S.insert new w5
+            ) w4 updates
+        ) w2 invertedTransitions
+      go p w3
+
+-- The traceST hackery is used for debugging.
+traceST :: String -> ST s ()
+traceST _ = pure ()
+-- traceST str = unsafeIOToST (putStrLn str)
 
 -- This gives a canonical order to the states. Any state missing from
 -- the resulting map was not reachable. The map goes from old state
@@ -475,12 +515,22 @@ data Partition s = Partition
   !Int -- identifier, these are produced from a monotonically increasing source
   !(STRef s (Metadata s))
 
+instance Eq (Partition s) where
+  Partition x _ == Partition y _ = x == y
+
+instance Ord (Partition s) where
+  compare (Partition x _) (Partition y _) = compare x y
+
+instance Show (Partition s) where
+  show (Partition x _) = show x
+
 data Metadata s = Metadata
   !Int -- Current size of the partition
   !(MutablePrimArray s Int) -- Elements in the partition
 
 -- A partitioning of contiguous machine integers
 data Partitions s = Partitions
+  !Int -- upper bound on values that can be inserted, used for error checking
   !(MutablePrimArray s Int) -- singleton array with next partition identifier
   !(STRef s [Partition s])
   -- All of the partitions. On the wikipedia page for partition refinement,
@@ -492,9 +542,34 @@ data Partitions s = Partitions
   -- Map from element to index in partition. This is only meaningful
   -- when you already know the partition that the element is in.
 
-finishPartitions :: Partitions s -> ST s (Set (Set Int))
-finishPartitions (Partitions _ ps _ _) = do
-  
+ex1 :: ([Set Int],[Int])
+ex1 = runST $ do
+  (p,_) <- newPartitions 7
+  xs1 <- splitPartitions p (SU.fromList [5,4,2])
+  xs2 <- splitPartitions p (SU.fromList [4,2,0,1])
+  xs3 <- splitPartitions p (SU.fromList [4,2,0])
+  xs4 <- splitPartitions p (SU.fromList [2,6,0])
+  xs5 <- splitPartitions p (SU.fromList [2,6,4])
+  r <- finishPartitions p
+  pure (r,[length xs1,length xs2,length xs3,length xs4,length xs5])
+
+finishPartitions :: Partitions s -> ST s [Set Int]
+finishPartitions (Partitions _ _ ps _ _) = do
+  xs <- readSTRef ps
+  F.foldlM
+    (\ys (Partition _ r) -> do
+      Metadata sz elements <- readSTRef r
+      if sz > 0
+        then do
+          let go !ix !s = if ix >= 0
+                then do
+                  e <- PM.readPrimArray elements ix
+                  go (ix - 1) (S.insert e s)
+                else pure s
+          y <- go (sz - 1) S.empty
+          pure (y : ys)
+        else pure ys
+    ) [] xs
 
 -- This starts out with just one big partition.
 newPartitions :: Int -> ST s (Partitions s, Partition s)
@@ -514,12 +589,12 @@ newPartitions !total = do
   let p0 = Partition 0 meta0
   partitionList <- newSTRef [p0]
   elementToPartition <- PM.newArray total p0
-  pure (Partitions counter partitionList elementToPartition elementToIndex, p0)
+  pure (Partitions total counter partitionList elementToPartition elementToIndex, p0)
   
 -- In the returned tuples, the first element is the already-existing partition
 -- (which may have shrunk) and the second element is the newly-created partition.
 splitPartitions :: forall s. Partitions s -> SU.Set Int -> ST s [(Partition s,Partition s)]
-splitPartitions (Partitions counter partitionList elementToPartition elementToIndex) distinction = do
+splitPartitions (Partitions total counter partitionList elementToPartition elementToIndex) distinction = do
   c0 <- PM.readPrimArray counter 0
   partitionListA <- readSTRef partitionList
   (partitionListB, updatedPartitionPairs, c1) <- go c0 partitionListA [] M.empty (SU.toList distinction)
@@ -529,51 +604,61 @@ splitPartitions (Partitions counter partitionList elementToPartition elementToIn
   where
   -- Invariant: the keys of the recend partition map must match the
   -- partition identifiers in the values.
-  go :: Int -> [Partition s] -> [(Partition s, Partition s)] -> Map Int (Partition s) -> [Int] -> ST s ([Partition s],[(Partition s, Partition s)],Int)
+  go :: Int -> [Partition s] -> [(Partition s, Partition s)]
+     -> Map Int (Partition s) -> [Int]
+     -> ST s ([Partition s],[(Partition s, Partition s)],Int)
   go !cntr !plist !pnew !_ [] = pure (plist,pnew,cntr)
-  go !cntr !plist !pnew !recent (x : xs) = do
-    poriginal@(Partition pnum mreforiginal) <- PM.readArray elementToPartition x
-    -- Remove the element from the original partition. To do
-    -- this, we must look up its position, move the last element
-    -- in the partition into this position and then update the
-    -- position of what was previously the last element. 
-    Metadata origSz origElems <- readSTRef mreforiginal
-    origLast <- PM.readPrimArray origElems (origSz - 1)
-    origIx <- PM.readPrimArray elementToIndex x
-    PM.writePrimArray origElems origIx origLast
-    PM.writePrimArray elementToIndex origLast origIx
-    writeSTRef mreforiginal $! Metadata (origSz - 1) origElems
-    case M.lookup pnum recent of
-      Nothing -> do
-        pelems <- PM.newPrimArray 1
-        PM.writePrimArray pelems 0 x
-        let m = Metadata 1 pelems
-        mref <- newSTRef m
-        let !p = Partition cntr mref
-        -- Add the element to the new partition. It was removed
-        -- earlier before the case statement.
-        PM.writeArray elementToPartition x p
-        PM.writePrimArray elementToIndex x 0
-        go (cntr + 1) (p : plist) ((poriginal,p) : pnew) (M.insert pnum p recent) xs
-      Just myPartition@(Partition _ metaref) -> do
-        Metadata sz buf <- readSTRef metaref
-        bufSz <- PM.getSizeofMutablePrimArray buf
-        PM.writeArray elementToPartition x myPartition
-        PM.writePrimArray elementToIndex x bufSz
-        if bufSz < sz
-          then do
-            PM.writePrimArray buf bufSz x
-            writeSTRef metaref $! Metadata (sz + 1) buf
-          else do
-            let newBufSz = bufSz * 2
-            newBuf <- PM.newPrimArray newBufSz
-            -- intentionally using the old buffer size as the index
-            PM.writePrimArray newBuf bufSz x
-            writeSTRef metaref $! Metadata (sz + 1) newBuf
-        go cntr plist pnew recent xs
+  go !cntr !plist !pnew !recent (x : xs) = if x >= total
+    then error "Automata.Internal: tried to refine partition with unacceptably large value"
+    else do
+      poriginal@(Partition pnum mreforiginal) <- PM.readArray elementToPartition x
+      -- Remove the element from the original partition. To do
+      -- this, we must look up its position, move the last element
+      -- in the partition into this position and then update the
+      -- position of what was previously the last element. 
+      Metadata origSz origElems <- readSTRef mreforiginal
+      origLast <- PM.readPrimArray origElems (origSz - 1)
+      origIx <- PM.readPrimArray elementToIndex x
+      PM.writePrimArray origElems origIx origLast
+      PM.writePrimArray elementToIndex origLast origIx
+      writeSTRef mreforiginal $! Metadata (origSz - 1) origElems
+      case M.lookup pnum recent of
+        Nothing -> do
+          pelems <- PM.newPrimArray 1
+          PM.writePrimArray pelems 0 x
+          let m = Metadata 1 pelems
+          mref <- newSTRef m
+          let !p = Partition cntr mref
+          -- Add the element to the new partition. It was removed
+          -- earlier before the case statement.
+          PM.writeArray elementToPartition x p
+          PM.writePrimArray elementToIndex x 0
+          go (cntr + 1) (p : plist) ((poriginal,p) : pnew) (M.insert pnum p recent) xs
+        Just myPartition@(Partition _ metaref) -> do
+          Metadata sz buf <- readSTRef metaref
+          bufSz <- PM.getSizeofMutablePrimArray buf
+          PM.writeArray elementToPartition x myPartition
+          PM.writePrimArray elementToIndex x sz
+          if sz < bufSz
+            then do
+              PM.writePrimArray buf sz x
+              writeSTRef metaref $! Metadata (sz + 1) buf
+            else do
+              let newBufSz = bufSz * 2
+              newBuf <- PM.newPrimArray newBufSz
+              PM.setPrimArray newBuf 0 newBufSz 12345678
+              PM.copyMutablePrimArray newBuf 0 buf 0 bufSz
+              -- intentionally using the old size as the index
+              PM.writePrimArray newBuf sz x
+              writeSTRef metaref $! Metadata (sz + 1) newBuf
+          go cntr plist pnew recent xs
 
 partitionCardinality :: Partition s -> ST s Int
 partitionCardinality (Partition _ r) = do
   Metadata card _ <- readSTRef r
   pure card
 
+partitionStates :: Partition s -> ST s (PrimArray Int)
+partitionStates (Partition _ r) = do
+  Metadata card arr <- readSTRef r
+  C.freeze arr 0 card

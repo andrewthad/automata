@@ -21,9 +21,11 @@ import Test.QuickCheck.Instances.Enum ()
 import Test.Tasty (TestTree,defaultMain,testGroup,adjustOption)
 import Test.Tasty.HUnit (testCase)
 
+import qualified Alphabet as A
 import qualified Automata.Nfsa as Nfsa
 import qualified Automata.Nfst as Nfst
 import qualified Automata.Dfsa as Dfsa
+import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
 import qualified Automata.Dfst as Dfst
 import qualified Automata.Dfst.Compact as CDfst
 import qualified Automata.Nfsa.Builder as B
@@ -108,6 +110,19 @@ tests = testGroup "Automata"
       , testCase "D" (Dfsa.evaluate exDfsa2 [D1] @?= True)
       , testCase "E" (Dfsa.evaluate exDfsa2 [D0,D2] @?= True)
       , testCase "F" (Dfsa.evaluate exDfsa2 [D0,D2] @?= True)
+      ]
+    , testGroup "evaluatePrimArray"
+      [ testGroup "alphabet"
+        [ testGroup "once"
+          [ testCase "lifted" (Dfsa.evaluatePrimArray A.liftedAcceptor A.once @?= True)
+          , testCase "unboxed" (UnboxedDfsa.evaluatePrimArray A.unboxedAcceptor A.once @?= True)
+          ]
+        , testGroup "twice"
+          [ testCase "lifted" (Dfsa.evaluatePrimArray A.liftedAcceptor A.twice @?= True)
+          , testCase "unboxed" (UnboxedDfsa.evaluatePrimArray A.unboxedAcceptor A.twice @?= True)
+          , testCase "optimal" (A.evaluateOptimally A.twice @?= True)
+          ]
+        ]
       ]
     , testGroup "union"
       [ testGroup "unit"

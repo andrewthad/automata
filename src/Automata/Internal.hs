@@ -65,9 +65,8 @@ import qualified Data.Semiring
 import qualified Data.Primitive as PM
 
 -- | Deterministic Finite State Automaton.
---
--- The start state is always zero.
 data Dfsa t = Dfsa
+  -- The start state is always zero.
   { dfaTransition :: !(Array (DM.Map t Int))
     -- ^ Given a state and transition, this field tells you what
     --   state to go to next. The length of this array must match
@@ -78,23 +77,22 @@ data Dfsa t = Dfsa
   } deriving (Eq,Show)
 
 -- | Non-Deterministic Finite State Automaton.
---
--- Some notes on the implementation and design:
---
--- * You can transition to any non-negative number of states (including 0).
--- * There is only one start state.
--- * We use the Thompson encoding. This means that there is an epsilon
---   transition that consumes no input.
--- * We store the full epsilon closure for every state. This means that,
---   when evaluating the NFA, we do not ever need to compute the closure.
--- * There is no Eq instance for NFA. In general, this can take exponential
---   time. If you really need to do this, convert the NFA to a DFA.
---
--- Invariants:
--- 
--- * The start state is always the state at position 0.
--- * The length of nfaTransition is given by nfaStates.
 data Nfsa t = Nfsa
+  -- Some notes on the implementation and design:
+  --
+  -- * You can transition to any non-negative number of states (including 0).
+  -- * There is only one start state.
+  -- * We use the Thompson encoding. This means that there is an epsilon
+  --   transition that consumes no input.
+  -- * We store the full epsilon closure for every state. This means that,
+  --   when evaluating the NFA, we do not ever need to compute the closure.
+  -- * There is no Eq instance for NFA. In general, this can take exponential
+  --   time. If you really need to do this, convert the NFA to a DFA.
+  --
+  -- Invariants:
+  -- 
+  -- * The start state is always the state at position 0.
+  -- * The length of nfaTransition is given by nfaStates.
   { nfaTransition :: !(Array (TransitionNfsa t))
     -- ^ Given a state and transition, this field tells you what
     --   state to go to next. The length of this array must match

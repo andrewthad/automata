@@ -12,6 +12,7 @@ module Automata.Dfsa
     Dfsa
     -- ** Evaluation
   , evaluate
+  , evaluatePrimArray
     -- ** Properties
   , order
   , size
@@ -45,7 +46,7 @@ import Prelude hiding (null)
 import Automata.Internal (Dfsa(..),State(..),union,intersection,acceptance,rejection,minimize)
 import Control.Applicative (liftA2)
 import Data.Foldable (foldl',for_)
-import Data.Primitive (Array)
+import Data.Primitive (Array,PrimArray,Prim)
 import Data.Semigroup (Last(..))
 import Control.Monad.ST (runST)
 
@@ -60,6 +61,13 @@ import qualified GHC.Exts as E
 evaluate :: (Foldable f, Ord t) => Dfsa t -> f t -> Bool
 evaluate (Dfsa transitions finals) tokens = SU.member
   (foldl' (\(active :: Int) token -> DM.lookup token (C.index transitions active)) 0 tokens)
+  finals
+
+-- | Evaluate a foldable collection of tokens against the DFA. This
+-- returns true if the string is accepted by the language.
+evaluatePrimArray :: (Prim t, Ord t) => Dfsa t -> PrimArray t -> Bool
+evaluatePrimArray (Dfsa transitions finals) tokens = SU.member
+  (C.foldl' (\(active :: Int) token -> DM.lookup token (C.index transitions active)) 0 tokens)
   finals
 
 -- | The number of states. The name _order_ comes from graph theory,

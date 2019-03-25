@@ -2,15 +2,36 @@
 
 module Main (main) where
 
-import Data.Enum.Types (D(..))
-import Gauge
 import Automata.Dfsa (Dfsa)
+import Data.Char (toUpper)
+import Data.Enum.Types (D(..))
+import Data.Primitive (PrimArray)
+import Gauge (bgroup,bench,defaultMain,whnf)
+
+import qualified Alphabet as A
 import qualified Automata.Dfsa as Dfsa
+import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
+import qualified GHC.Exts as E
+
 
 main :: IO ()
 main = defaultMain
   [ bgroup "Dfsa"
-    [ bgroup "union"
+    [ bgroup "evaluate"
+      [ bgroup "alphabet"
+        [ bgroup "once"
+          [ bench "lifted" (whnf (\x -> Dfsa.evaluatePrimArray x A.once) A.liftedAcceptor)
+          , bench "unboxed" (whnf (\x -> UnboxedDfsa.evaluatePrimArray x A.once) A.unboxedAcceptor)
+          , bench "optimal" (whnf (\x -> A.evaluateOptimally x) A.once)
+          ]
+        , bgroup "twice"
+          [ bench "lifted" (whnf (\x -> Dfsa.evaluatePrimArray x A.twice) A.liftedAcceptor)
+          , bench "unboxed" (whnf (\x -> UnboxedDfsa.evaluatePrimArray x A.twice) A.unboxedAcceptor)
+          , bench "optimal" (whnf (\x -> A.evaluateOptimally x) A.twice)
+          ]
+        ]
+      ]
+    , bgroup "union"
       [ bgroup "identical"
         [ bench "10" (whnf (\x -> Dfsa.union x x) dfsa1_10)
         , bench "20" (whnf (\x -> Dfsa.union x x) dfsa1_20)

@@ -41,6 +41,7 @@ library
     Automata.Nfst
     Automata.Dfst
     Automata.Dfst.Compact
+    Data.Bytes
   build-depends:
     , base >=4.10.1.0 && <5
     , bytestring >= 0.10.8

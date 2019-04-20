@@ -3,6 +3,7 @@
 module Alphabet
   ( once
   , twice
+  , twiceAscii
   , liftedAcceptor
   , unboxedAcceptor
   , evaluateOptimally
@@ -23,10 +24,10 @@ module Alphabet
 -- it is expected to.
 
 import Automata.Dfsa (Dfsa)
-import Data.Char (toUpper)
+import Data.Char (toUpper,ord)
 import Data.Enum.Types (D(..))
 import Data.Primitive (PrimArray(..))
-import Data.Word (Word32)
+import Data.Word (Word32,Word8)
 import Data.Bits ((.|.))
 
 import qualified Automata.Dfsa as Dfsa
@@ -38,7 +39,13 @@ once :: PrimArray Char
 once = E.fromList "aBcDeFgHIJKLMnopqRSTuvWXyZ"
 
 twice :: PrimArray Char
-twice = E.fromList "aBcDeFgHIJKLMnopqRSTuvWXyZABCDefGhijkLmNopQRSTuVwXyz"
+twice = E.fromList twiceString
+
+twiceString :: String
+twiceString = "aBcDeFgHIJKLMnopqRSTuvWXyZABCDefGhijkLmNopQRSTuVwXyz"
+
+twiceAscii :: PrimArray Word8
+twiceAscii = E.fromList (map (fromIntegral . ord) twiceString)
 
 liftedAcceptor :: Dfsa Char
 liftedAcceptor = Dfsa.buildDefaulted $ \start _ -> do

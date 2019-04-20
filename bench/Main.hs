@@ -6,11 +6,12 @@ import Automata.Dfsa (Dfsa)
 import Data.Char (toUpper)
 import Data.Enum.Types (D(..))
 import Data.Primitive (PrimArray)
-import Gauge (bgroup,bench,defaultMain,whnf)
+import Gauge (bgroup,bench,defaultMain,whnf,nf)
 
 import qualified Alphabet as A
 import qualified Automata.Dfsa as Dfsa
 import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
+import qualified Data.Bytes as Bytes
 import qualified GHC.Exts as E
 
 
@@ -21,13 +22,17 @@ main = defaultMain
       [ bgroup "alphabet"
         [ bgroup "once"
           [ bench "lifted" (whnf (\x -> Dfsa.evaluatePrimArray x A.once) A.liftedAcceptor)
-          , bench "unboxed" (whnf (\x -> UnboxedDfsa.evaluatePrimArray x A.once) A.unboxedAcceptor)
           , bench "optimal" (whnf (\x -> A.evaluateOptimally x) A.once)
+          , bench "unboxed" (whnf (\x -> UnboxedDfsa.evaluatePrimArray x A.once) A.unboxedAcceptor)
           ]
         , bgroup "twice"
           [ bench "lifted" (whnf (\x -> Dfsa.evaluatePrimArray x A.twice) A.liftedAcceptor)
-          , bench "unboxed" (whnf (\x -> UnboxedDfsa.evaluatePrimArray x A.twice) A.unboxedAcceptor)
           , bench "optimal" (whnf (\x -> A.evaluateOptimally x) A.twice)
+          , bgroup "unboxed"
+            [ bench "utf32" (whnf (\x -> UnboxedDfsa.evaluatePrimArray x A.twice) A.unboxedAcceptor)
+            , bench "ascii" (whnf (\x -> UnboxedDfsa.evaluateAscii x (Bytes.fromPrimArray A.twiceAscii)) A.unboxedAcceptor)
+            , bench "utf8" (whnf (\x -> UnboxedDfsa.evaluateUtf8 x (Bytes.fromPrimArray A.twiceAscii)) A.unboxedAcceptor)
+            ]
           ]
         ]
       ]

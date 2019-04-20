@@ -29,6 +29,7 @@ import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
 import qualified Automata.Dfst as Dfst
 import qualified Automata.Dfst.Compact as CDfst
 import qualified Automata.Nfsa.Builder as B
+import qualified Data.Bytes as Bytes
 import qualified Data.Set as S
 import qualified Data.List as L
 import qualified GHC.Exts as E
@@ -119,8 +120,12 @@ tests = testGroup "Automata"
           ]
         , testGroup "twice"
           [ testCase "lifted" (Dfsa.evaluatePrimArray A.liftedAcceptor A.twice @?= True)
-          , testCase "unboxed" (UnboxedDfsa.evaluatePrimArray A.unboxedAcceptor A.twice @?= True)
           , testCase "optimal" (A.evaluateOptimally A.twice @?= True)
+          , testGroup "unboxed"
+            [ testCase "utf32" (UnboxedDfsa.evaluatePrimArray A.unboxedAcceptor A.twice @?= True)
+            , testCase "ascii" (UnboxedDfsa.evaluateAscii A.unboxedAcceptor (Bytes.fromPrimArray A.twiceAscii) @?= Right True)
+            , testCase "utf8" (UnboxedDfsa.evaluateUtf8 A.unboxedAcceptor (Bytes.fromPrimArray A.twiceAscii) @?= Right True)
+            ]
           ]
         ]
       ]

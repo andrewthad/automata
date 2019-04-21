@@ -191,7 +191,7 @@ evaluateList (CompactDfst transitions finals) tokensX = case tokensX of
     [] -> if SU.member state finals
       then let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
             in Just $! C.unsafeFromListReverseN (outputSz + 1) (r : output)
-      else Nothing -- error ("uhoetn " ++ show state ++ " " ++ show finals) -- Nothing
+      else Nothing
     tokenB : tokensB -> case PM.indexArray transitions state of
       TransitionCompactDfstSingle (CompactSequence string successState failureState successToken failureToken) ->
         if PM.indexArray string 0 == tokenB

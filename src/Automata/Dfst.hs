@@ -242,7 +242,7 @@ buildDefaulted :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
   => (forall s. State s -> State s -> Builder t m s a)
   -> Dfst t m
 buildDefaulted fromStartAndDefault =
-  case do { (start, def) <- liftA2 (,) state state; fromStartAndDefault start def; pure def;} of
+  case do { (start, def) <- liftA2 (,) state state; _ <- fromStartAndDefault start def; pure def;} of
     Builder f -> case f 0 [] [] of
       Result totalStates edges final (State def) ->
         internalBuild totalStates edges final def
@@ -256,7 +256,7 @@ build fromStartState =
       Result totalStates edges final _ ->
         internalBuild totalStates edges final 0
 
-internalBuild :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
+internalBuild :: forall t m. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
   => Int -> [Edge t m] -> [Int] -> Int -> Dfst t m
 internalBuild totalStates edges final def = 
   let ts0 = runST $ do

@@ -1,9 +1,11 @@
 {-# language BangPatterns #-}
+{-# language DeriveFoldable #-}
 
 module Automata.Internal.Transducer
   ( Nfst(..)
   , TransitionNfst(..)
   , Dfst(..)
+  , MotionCompactDfst(..)
   , MotionDfst(..)
   , Edge(..)
   , EdgeDest(..)
@@ -47,20 +49,27 @@ import qualified Data.Map.Lifted.Unlifted as MLN
 -- These RLE transition sequences produce their output token
 -- once for every token that is consumed.
 data CompactDfst t m = CompactDfst
-  { compactDfstTransition :: !(Array (TransitionCompactDfst t m))
+  { compactDfstTransition :: !(Array (TransitionCompactDfst t))
   , compactDfstFinal :: !(SU.Set Int)
+  , compactDfstOutput :: !(Array m)
   }
 
-data TransitionCompactDfst t m
-  = TransitionCompactDfstSingle (CompactSequence t m)
-  | TransitionCompactDfstMultiple {-# UNPACK #-} !(DM.Map t (MotionDfst m))
+data TransitionCompactDfst t
+  = TransitionCompactDfstSingle (CompactSequence t)
+  | TransitionCompactDfstMultiple {-# UNPACK #-} !(DM.Map t MotionCompactDfst)
 
-data CompactSequence t m = CompactSequence
+data CompactSequence t = CompactSequence
   !(Array t) -- sequence of inputs to match, length >= 1
   !Int -- destination after straight-and-narrow path
   !Int -- destination after veering off path
-  !m -- output from starting straight-and-narrow path
-  !m -- output after veering off path
+  !Int -- output (as an index) from starting straight-and-narrow path
+  !Int -- output (as an index) after veering off path
+
+data MotionCompactDfst = MotionCompactDfst
+  { motionCompactDfstState :: !Int -- index into state array
+  , motionCompactDfstOutput :: !Int -- index into output array
+  } deriving (Eq,Show)
+
 
 -- | A deterministic finite state transducer.
 data Dfst t m = Dfst
@@ -71,12 +80,12 @@ data Dfst t m = Dfst
   , dfstFinal :: !(SU.Set Int)
     -- ^ A string that ends in any of these set of states is
     --   considered to have been accepted by the grammar.
-  } deriving (Eq,Show)
+  } deriving (Eq,Show,Foldable)
 
 data MotionDfst m = MotionDfst
   { motionDfstState :: !Int
   , motionDfstOutput :: !m
-  } deriving (Eq,Show)
+  } deriving (Eq,Show,Foldable)
 
 -- | A nondeterministic finite state transducer. The @t@ represents the input token on
 -- which a transition occurs. The @m@ represents the output token that

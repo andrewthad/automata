@@ -22,6 +22,7 @@ module Automata.Dfst.Compact
 import Prelude hiding (map)
 
 import Automata.Internal (State(..),Dfsa(..),composeMapping)
+import Automata.Internal.Transducer (MotionCompactDfst(..))
 import Automata.Internal.Transducer (CompactDfst(..),Dfst(..),MotionDfst(..),Edge(..),EdgeDest(..),CompactSequence(..),TransitionCompactDfst(..))
 import Control.Applicative (liftA2)
 import Control.Monad.ST (runST)
@@ -39,6 +40,7 @@ import Data.Foldable (foldlM)
 import Control.Monad.Trans.State.Strict (get,put,runState)
 
 import qualified Data.ByteString.Char8 as BC
+import qualified Data.Foldable as F
 import qualified Data.DisjointMap as DJM
 import qualified Data.List as L
 import qualified Data.Map.Interval.DBTSLL as DM
@@ -47,6 +49,7 @@ import qualified Data.Primitive as P
 import qualified Data.Primitive as PM
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set as S
+import qualified Data.Set.Lifted as SL
 import qualified Data.Set.Unboxed as SU
 import qualified GHC.Exts as E
 
@@ -70,7 +73,7 @@ instance (Ord k, Semigroup v) => Monoid (M k v) where
 -- number lacks a good theoretical foundation, but it is still
 -- a useful approximation of the size.
 states :: CompactDfst t m -> Int
-states (CompactDfst t _) = P.sizeofArray t
+states (CompactDfst t _ _) = P.sizeofArray t
 
 -- Implementation of compact: We figure out how we want to map old
 -- states to new states. Then, we perform the substitution, deleting
@@ -84,11 +87,15 @@ states (CompactDfst t _) = P.sizeofArray t
 -- requires some more thought, so I'm not sure if it will ever
 -- be done.
 
-compact :: forall t m. (Eq m, Enum t, Ord t, Bounded t)
+compact :: forall t m. (Ord m, Enum t, Ord t, Bounded t)
   => Dfst t m
   -> CompactDfst t m
 compact (Dfst transitions finals) =
-  let -- How many transitions there are from other nodes to each node.
+  let outputs = SL.fromList $ F.foldr (\m xs -> F.foldr (\(MotionDfst _ out) ys -> out : ys) xs m) [] transitions
+      outputToIndex out = fromMaybe
+        (error ("Automata.Dfst.Compact.compact: bad output token, sz=" ++ show (F.length outputs) ++ ",trans_lens=" ++ show (fmap F.length transitions)))
+        (SL.lookupIndex out outputs)
+      -- How many transitions there are from other nodes to each node.
       -- We are interested in cases where this number is one.
       entryCounts :: M.Map Int (Sum Int)
       M entryCounts = C.foldlMap' (foldMap (M . flip M.singleton (Sum 1) . motionDfstState) . DM.elems) transitions
@@ -99,6 +106,7 @@ compact (Dfst transitions finals) =
           [(_,_,x),(lo,hi,v),(_,_,w)] | lo == hi && x == w -> (DJM.singleton ix ([lo],Last (motionDfstState v)),M.singleton ix (v,w))
           [(lo,hi,v),(_,_,w)] | lo == hi -> (DJM.singleton ix ([lo],Last (motionDfstState v)),M.singleton ix (v,w))
           [(_,_,w),(lo,hi,v)] | lo == hi -> (DJM.singleton ix ([lo],Last (motionDfstState v)),M.singleton ix (v,w))
+          -- TODO: remember why this is commented out.
           -- [(lo,hi,v)] | lo == hi -> (DJM.singleton ix [lo],M.singleton ix v)
           _ -> (DJM.empty,M.empty)
         ) transitions
@@ -136,24 +144,24 @@ compact (Dfst transitions finals) =
           case DJM.lookup' ixOld collapseFinal of
             Nothing -> do
               PM.writeArray states ix $ TransitionCompactDfstMultiple
-                $ DM.map (\(MotionDfst s out) -> MotionDfst (oldToNew M.! s) out)
+                $ DM.map (\(MotionDfst s out) -> MotionCompactDfst (oldToNew M.! s) (outputToIndex out))
                 $ PM.indexArray transitions ixOld
             Just (string@(_ : _), Last successStateOld) -> do
               PM.writeArray states ix $ TransitionCompactDfstSingle $ CompactSequence
                 (E.fromList string)
                 (oldToNew M.! successStateOld)
                 (oldToNew M.! (motionDfstState (snd (singles M.! ixOld))))
-                (motionDfstOutput (fst (singles M.! ixOld)))
-                (motionDfstOutput (snd (singles M.! ixOld)))
+                (outputToIndex (motionDfstOutput (fst (singles M.! ixOld))))
+                (outputToIndex (motionDfstOutput (snd (singles M.! ixOld))))
         PM.unsafeFreezeArray states
       newFinals = SU.fromList (L.map (fromMaybe (error "Automata.Dfst.Compact.compact") . flip M.lookup oldToNew) (SU.toList finals))
-   in CompactDfst newTransitions newFinals
+   in CompactDfst newTransitions newFinals (SL.toArray outputs)
 
-evaluateList :: forall t m. (Ord t, Eq m)
+evaluateList :: forall t m. Ord t
   => CompactDfst t m
   -> [t]
   -> Maybe (Array (Ranged m))
-evaluateList (CompactDfst transitions finals) tokensX = case tokensX of
+evaluateList (CompactDfst transitions finals outputs) tokensX = case tokensX of
   [] -> bool Nothing (Just mempty) (SU.member 0 finals)
   token0 : tokens0 -> case PM.indexArray transitions 0 of
     TransitionCompactDfstSingle (CompactSequence string successState failureState successToken failureToken) ->
@@ -163,64 +171,60 @@ evaluateList (CompactDfst transitions finals) tokensX = case tokensX of
         then goSequence string 1 (PM.sizeofArray string) successState failureState failureToken 1 0 successToken 0 [] tokens0
         else goUnknown failureState 1 0 failureToken 0 [] tokens0
     TransitionCompactDfstMultiple theMap ->
-      let MotionDfst nextState outputToken = DM.lookup token0 theMap
-       in goUnknown nextState 1 0 outputToken 0 [] tokens0
+      let MotionCompactDfst nextState outputTokenIndex = DM.lookup token0 theMap
+       in goUnknown nextState 1 0 outputTokenIndex 0 [] tokens0
   where
-  goSequence :: Array t -> Int -> Int -> Int -> Int -> m -> Int -> Int -> m -> Int -> [Ranged m] -> [t] -> Maybe (Array (Ranged m))
-  goSequence !string !stringIx !stringSz !successState !failureState !failureToken !ix !outputSz !nextOutputToken !nextOutputStart !output !tokensA = case tokensA of
+  goSequence :: Array t -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> [Ranged m] -> [t] -> Maybe (Array (Ranged m))
+  goSequence !string !stringIx !stringSz !successState !failureState !failureTokenIndex !ix !outputSz !nextOutputTokenIndex !nextOutputStart !output !tokensA = case tokensA of
     [] -> if stringIx < stringSz
       -- Sequences may not contain final states, so mid-sequence input
       -- termination always indicates an unrecognized input.
       then Nothing
       else if SU.member successState finals
-        then let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
+        then let !r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
               in Just $! C.unsafeFromListReverseN (outputSz + 1) (r : output)
         else Nothing
     tokenB : tokensB -> if stringIx < stringSz
       then if PM.indexArray string stringIx == tokenB
-        then goSequence string (stringIx + 1) stringSz successState failureState failureToken (ix + 1) outputSz nextOutputToken nextOutputStart output tokensB
+        then goSequence string (stringIx + 1) stringSz successState failureState failureTokenIndex (ix + 1) outputSz nextOutputTokenIndex nextOutputStart output tokensB
         else bool
-          (let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
-            in goUnknown failureState (ix + 1) (outputSz + 1) failureToken ix (r : output) tokensB
+          (let !r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
+            in goUnknown failureState (ix + 1) (outputSz + 1) failureTokenIndex ix (r : output) tokensB
           )
-          (goUnknown failureState (ix + 1) outputSz failureToken nextOutputStart output tokensB)
-          (shortcutEquality nextOutputToken failureToken)
-      else goUnknown successState ix outputSz nextOutputToken nextOutputStart output (tokenB : tokensB)
-  goUnknown :: Int -> Int -> Int -> m -> Int -> [Ranged m] -> [t] -> Maybe (Array (Ranged m))
-  goUnknown !state !ix !outputSz !nextOutputToken !nextOutputStart !output !tokensA = case tokensA of
+          (goUnknown failureState (ix + 1) outputSz failureTokenIndex nextOutputStart output tokensB)
+          (nextOutputTokenIndex == failureTokenIndex)
+      else goUnknown successState ix outputSz nextOutputTokenIndex nextOutputStart output (tokenB : tokensB)
+  goUnknown :: Int -> Int -> Int -> Int -> Int -> [Ranged m] -> [t] -> Maybe (Array (Ranged m))
+  goUnknown !state !ix !outputSz !nextOutputTokenIndex !nextOutputStart !output !tokensA = case tokensA of
     [] -> if SU.member state finals
-      then let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
+      then let !r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
             in Just $! C.unsafeFromListReverseN (outputSz + 1) (r : output)
       else Nothing
     tokenB : tokensB -> case PM.indexArray transitions state of
-      TransitionCompactDfstSingle (CompactSequence string successState failureState successToken failureToken) ->
+      TransitionCompactDfstSingle (CompactSequence string successState failureState successTokenIndex failureTokenIndex) ->
         if PM.indexArray string 0 == tokenB
           -- Sequences are guaranteed to have length >= 1, so this indexing does
           -- not need to be guarded.
           then bool
-            (let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
-              in goSequence string 1 (PM.sizeofArray string) successState failureState failureToken (ix + 1) (outputSz + 1) successToken ix (r : output) tokensB
+            (let !r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
+              in goSequence string 1 (PM.sizeofArray string) successState failureState failureTokenIndex (ix + 1) (outputSz + 1) successTokenIndex ix (r : output) tokensB
             )
-            (goSequence string 1 (PM.sizeofArray string) successState failureState failureToken (ix + 1) outputSz successToken nextOutputStart output tokensB)
-            (shortcutEquality nextOutputToken successToken)
+            (goSequence string 1 (PM.sizeofArray string) successState failureState failureTokenIndex (ix + 1) outputSz successTokenIndex nextOutputStart output tokensB)
+            (nextOutputTokenIndex == successTokenIndex)
           else bool
-            (let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
-              in goUnknown failureState (ix + 1) (outputSz + 1) failureToken ix (r : output) tokensB
+            (let !r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
+              in goUnknown failureState (ix + 1) (outputSz + 1) failureTokenIndex ix (r : output) tokensB
             )
-            (goUnknown failureState (ix + 1) outputSz failureToken nextOutputStart output tokensB)
-            (shortcutEquality nextOutputToken failureToken)
+            (goUnknown failureState (ix + 1) outputSz failureTokenIndex nextOutputStart output tokensB)
+            (nextOutputTokenIndex == failureTokenIndex)
       TransitionCompactDfstMultiple theMap ->
-        let MotionDfst nextState outputToken = DM.lookup tokenB theMap
+        let MotionCompactDfst nextState outputIndex = DM.lookup tokenB theMap
          in bool
-              (let !r = Ranged nextOutputStart (ix - nextOutputStart) nextOutputToken
-                in goUnknown nextState (ix + 1) (outputSz + 1) outputToken ix (r : output) tokensB
+              (let !r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
+                in goUnknown nextState (ix + 1) (outputSz + 1) outputIndex ix (r : output) tokensB
               )
-              (goUnknown nextState (ix + 1) outputSz outputToken nextOutputStart output tokensB)
-              (shortcutEquality nextOutputToken outputToken)
-
-shortcutEquality :: Eq m => m -> m -> Bool
-{-# INLINE shortcutEquality #-}
-shortcutEquality = (==)
+              (goUnknown nextState (ix + 1) outputSz outputIndex nextOutputStart output tokensB)
+              (nextOutputTokenIndex == outputIndex)
 
 -- -- | Returns the outputs as well as the position at which they were produced.
 -- evaluate :: (Foldable f, Ord t, Eq m)
@@ -267,7 +271,7 @@ toDot :: (Bounded t, Enum t)
   -> (t -> t -> m -> String) -- ^ Label a range
   -> CompactDfst t m
   -> String
-toDot makeSequenceLabel makeLabel (CompactDfst ts fs) = concat $
+toDot makeSequenceLabel makeLabel (CompactDfst ts fs outputs) = concat $
   [ "digraph D {\n" ]
   ++
   dotNodes (sizeofArray ts - 1) fs
@@ -275,10 +279,10 @@ toDot makeSequenceLabel makeLabel (CompactDfst ts fs) = concat $
   (do (src,m) <- zip (enumFrom (0 :: Int)) (E.toList ts)
       case m of
         TransitionCompactDfstMultiple motions ->
-          dotSourceEdges makeLabel src motions
+          dotSourceEdges makeLabel outputs src motions
         TransitionCompactDfstSingle (CompactSequence inputs successState failureState successOutput failureOutput) ->
-          [ "  N" ++ show src ++ " -> N" ++ show successState ++ " [label=\"" ++ escapeQuotes (makeSequenceLabel (E.toList inputs) successOutput) ++ "\"];\n"
-          , "  N" ++ show src ++ " -> N" ++ show failureState ++ " [label=\"" ++ escapeQuotes (makeSequenceLabel [] failureOutput) ++ "\"];\n"
+          [ "  N" ++ show src ++ " -> N" ++ show successState ++ " [label=\"" ++ escapeQuotes (makeSequenceLabel (E.toList inputs) (PM.indexArray outputs successOutput)) ++ "\"];\n"
+          , "  N" ++ show src ++ " -> N" ++ show failureState ++ " [label=\"" ++ escapeQuotes (makeSequenceLabel [] (PM.indexArray outputs failureOutput)) ++ "\"];\n"
           ]
   )
   ++
@@ -289,13 +293,15 @@ dotNodes n fs = if n >= 0
   then ("  N" ++ show n ++ " [shape=" ++ (if SU.member n fs then "circle" else "square") ++ "];\n") : dotNodes (n - 1) fs
   else []
 
-dotSourceEdges :: (Bounded t, Enum t) => (t -> t -> m -> String) -> Int -> DM.Map t (MotionDfst m) -> [String]
-dotSourceEdges makeLabel src dsts = DM.foldrWithKey
-  (\lo hi motion xs -> dotEdge makeLabel src lo hi motion : xs) [] dsts
+dotSourceEdges :: (Bounded t, Enum t)
+  => (t -> t -> m -> String) -> Array m -> Int 
+  -> DM.Map t MotionCompactDfst -> [String]
+dotSourceEdges makeLabel outputs src dsts = DM.foldrWithKey
+  (\lo hi motion xs -> dotEdge makeLabel outputs src lo hi motion : xs) [] dsts
 
-dotEdge :: (t -> t -> m -> String) -> Int -> t -> t -> MotionDfst m -> String
-dotEdge makeLabel src lo hi (MotionDfst dst output) =
-  "  N" ++ show src ++ " -> N" ++ show dst ++ " [label=\"" ++ escapeQuotes (makeLabel lo hi output) ++ "\"];\n"
+dotEdge :: (t -> t -> m -> String) -> Array m -> Int -> t -> t -> MotionCompactDfst -> String
+dotEdge makeLabel outputs src lo hi (MotionCompactDfst dst output) =
+  "  N" ++ show src ++ " -> N" ++ show dst ++ " [label=\"" ++ escapeQuotes (makeLabel lo hi (PM.indexArray outputs output)) ++ "\"];\n"
 
 escapeQuotes :: String -> String
 escapeQuotes str = do

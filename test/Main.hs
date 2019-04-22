@@ -22,12 +22,14 @@ import Test.Tasty (TestTree,defaultMain,testGroup,adjustOption)
 import Test.Tasty.HUnit (testCase)
 
 import qualified Alphabet as A
+import qualified Sentence as SEN
 import qualified Automata.Nfsa as Nfsa
 import qualified Automata.Nfst as Nfst
 import qualified Automata.Dfsa as Dfsa
 import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
 import qualified Automata.Dfst as Dfst
 import qualified Automata.Dfst.Compact as CDfst
+import qualified Automata.Dfst.Compact.Unboxed as CUDfst
 import qualified Automata.Nfsa.Builder as B
 import qualified Data.Bytes as Bytes
 import qualified Data.Set as S
@@ -190,6 +192,8 @@ tests = testGroup "Automata"
       , testCase "C" (Dfst.evaluate exDfst3 [E2,E2,E2,E2,E2,E2] @?= Just (E.fromList [D1,D1,D1,D1,D1,D1]))
       , testCase "D" (Dfst.evaluate exDfst4 "Xfoo, " @?= Just (E.fromList (replicate 6 A0)))
       , testCase "E" (Dfst.evaluate exDfst4 "Xfoo,  " @?= Just (E.fromList (replicate 7 A0)))
+      , testCase "F" (Dfst.evaluate SEN.liftedTransducer SEN.fastCat @?= Just (E.fromList SEN.fastCatExpected))
+      , testCase "G" (Dfst.evaluate SEN.liftedTransducer SEN.slowDog @?= Just (E.fromList SEN.slowDogExpected))
       ]
     , testGroup "compact"
       [ testCase "A" (CDfst.evaluateList (CDfst.compact exDfst1) [D0,D2] @?= Nothing)
@@ -199,6 +203,9 @@ tests = testGroup "Automata"
       , testCase "E" (CDfst.evaluateList (CDfst.compact exDfst4) "Xfoo,  " @?= Just (E.fromList [Ranged 0 7 A0]))
       , testCase "F" (CDfst.evaluateList (CDfst.compact exDfst4) "Xfoo,   " @?= Just (E.fromList [Ranged 0 8 A0]))
       , TL.testProperty "G" $ \x -> let dfst = generateDfst1 x in fmap expandRanged (CDfst.evaluateList (CDfst.compact dfst) [A0,A0,A0]) == Dfst.evaluate dfst [A0,A0,A0]
+      , testCase "H" (fmap expandRanged (CDfst.evaluateList SEN.compactTransducer SEN.fastCat) @?= Just (E.fromList SEN.fastCatExpected))
+      , testCase "I" ((fmap.fmap) expandRanged (CUDfst.evaluateUtf8 SEN.compactUnboxedTransducer (Bytes.fromByteArray SEN.fastCatAscii)) @?= Right (Just (E.fromList SEN.fastCatExpected)))
+      , testCase "J" ((fmap.fmap) expandRanged (CUDfst.evaluateAscii SEN.compactUnboxedTransducer (Bytes.fromByteArray SEN.fastCatAscii)) @?= Right (Just (E.fromList SEN.fastCatExpected)))
       ]
     , testGroup "union"
       [ testGroup "unit"

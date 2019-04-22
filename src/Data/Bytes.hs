@@ -16,6 +16,11 @@ module Data.Bytes
   , Utf8Sequence(..)
   , Utf8EndOfInput(..)
   , AsciiException(..)
+  , IndexChar(..)
+    -- * Indexing
+  , indexUtf8
+  , indexAscii
+  , terminate
     -- * Folds
   , foldl'
   , foldlM'
@@ -154,6 +159,7 @@ foldlAscii' f z0 (Bytes arr s l) = go s z0
       | otherwise = return acc1
 
 word8ToChar :: Word8 -> Char
+{-# INLINE word8ToChar #-}
 word8ToChar = unsafeChr . fromIntegral
 
 -- | Strict left-associated fold over bytes.
@@ -180,6 +186,44 @@ foldlUtf8' f z0 (Bytes arr s l) = go s z0
         Left e -> e $> acc1
         Right (IndexChar pos c) -> go pos (f acc1 c)
     | otherwise = Utf8StateEndOfInput (Utf8EndOfInput0 acc1)
+
+terminate :: Utf8State a -> Either Utf8Exception a
+{-# inline terminate #-}
+terminate (Utf8StateSequence err) = Left (Utf8ExceptionSequence err)
+terminate (Utf8StateEndOfInput i) = case i of
+  Utf8EndOfInput0 a -> Right a
+  Utf8EndOfInput1 w1 _ ->
+    Left (Utf8ExceptionEndOfInput (Utf8EndOfInput1 w1 ()))
+  Utf8EndOfInput2 w1 w2 _ ->
+    Left (Utf8ExceptionEndOfInput (Utf8EndOfInput2 w1 w2 ()))
+  Utf8EndOfInput3 w1 w2 w3 _ ->
+    Left (Utf8ExceptionEndOfInput (Utf8EndOfInput3 w1 w2 w3 ()))
+
+-- | Read a UTF-8 encoded character from a byte array.
+--
+-- TODO: Find a better place for this to go.
+indexUtf8 ::
+     ByteArray -- ^ Bytes
+  -> Int -- ^ Position in bytes
+  -> Int -- ^ End of bytes (not inclusive)
+  -> Either (Utf8State ()) IndexChar
+{-# inline indexUtf8 #-}
+indexUtf8 (ByteArray barr) !i !end
+  | i < end - 3 = first Utf8StateSequence (unsafeAdvanceChar4 arr i)
+  | i == end - 3 = unsafeAdvanceChar3 arr i
+  | i == end - 2 = unsafeAdvanceChar2 arr i
+  | i == end - 1 = unsafeAdvanceChar1 arr i
+  | otherwise = Left (Utf8StateEndOfInput (Utf8EndOfInput0 ()))
+  where
+  arr = PrimArray barr :: PrimArray Word8
+
+indexAscii ::
+     ByteArray
+  -> Int
+  -> Either AsciiException Char
+indexAscii !arr !i = let x = PM.indexByteArray arr i in if x < (128 :: Word8)
+  then Right (word8ToChar x)
+  else Left (AsciiException i x)
 
 -- Internal function. Precondition: there is exactly one byte
 -- remaining in the slice of bytes.

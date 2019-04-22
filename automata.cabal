@@ -41,6 +41,7 @@ library
     Automata.Nfst
     Automata.Dfst
     Automata.Dfst.Compact
+    Automata.Dfst.Compact.Unboxed
     Data.Bytes
   build-depends:
     , base >=4.10.1.0 && <5
@@ -52,7 +53,7 @@ library
     , semirings >= 0.3.1.1
     , transformers >= 0.5.5 && < 0.6
     , disjoint-containers >= 0.2.4 && < 0.3
-  ghc-options: -Wall -O2
+  ghc-options: -Wall -O2 -ddump-to-file -ddump-simpl -dsuppress-all
   default-language: Haskell2010
 
 benchmark bench
@@ -60,10 +61,13 @@ benchmark bench
   build-depends:
     , base
     , automata
+    , deepseq
     , gauge >= 0.2.4
     , enum-types >= 0.1.1
     , primitive >= 0.6.4
-  other-modules: Alphabet
+  other-modules:
+    Alphabet
+    Sentence
   ghc-options: -Wall -O2
   default-language: Haskell2010
   hs-source-dirs: bench, common
@@ -74,13 +78,16 @@ test-suite test
   main-is: Main.hs
   hs-source-dirs: test, common
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -O2
-  other-modules: Alphabet
+  other-modules:
+    Alphabet
+    Sentence
   build-depends:
     , HUnit
     , QuickCheck
     , automata
     , base >=4.7 && <5
     , containers
+    , deepseq
     , enum-types >= 0.1.1
     , leancheck
     , leancheck-enum-instances >= 0.1

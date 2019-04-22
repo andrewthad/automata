@@ -10,14 +10,30 @@ import Gauge (bgroup,bench,defaultMain,whnf,nf)
 
 import qualified Alphabet as A
 import qualified Automata.Dfsa as Dfsa
+import qualified Automata.Dfst as Dfst
+import qualified Automata.Dfst.Compact as CDfst
+import qualified Automata.Dfst.Compact.Unboxed as CUDfst
 import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
 import qualified Data.Bytes as Bytes
 import qualified GHC.Exts as E
+import qualified Sentence as SEN
 
 
 main :: IO ()
 main = defaultMain
-  [ bgroup "Dfsa"
+  [ bgroup "Dfst"
+    [ bgroup "evaluate"
+      [ bgroup "sentence"
+        [ bgroup "cat"
+          [ bench "lifted" (whnf (\x -> Dfst.evaluate x SEN.fastCat) SEN.liftedTransducer)
+          , bench "compact" (whnf (\x -> CDfst.evaluateList x SEN.fastCat) SEN.compactTransducer)
+          , bench "compact-unboxed-utf8" (whnf (\x -> CUDfst.evaluateUtf8 x (Bytes.fromByteArray SEN.fastCatAscii)) SEN.compactUnboxedTransducer)
+          , bench "compact-unboxed-ascii" (whnf (\x -> CUDfst.evaluateAscii x (Bytes.fromByteArray SEN.fastCatAscii)) SEN.compactUnboxedTransducer)
+          ]
+        ]
+      ]
+    ]
+  , bgroup "Dfsa"
     [ bgroup "evaluate"
       [ bgroup "alphabet"
         [ bgroup "once"

@@ -31,6 +31,7 @@ module Data.Bytes
   , fromPrimArray
   ) where
 
+import Data.Bytes.Types (Bytes(..))
 import Data.Bifunctor (first)
 import Control.Exception (Exception)
 import Control.Monad (when)
@@ -42,11 +43,6 @@ import Data.Kind (Type)
 import GHC.Base (unsafeChr)
 import GHC.Exts (Word(W#),Char(C#),chr#,word2Int#)
 import qualified Data.Primitive as PM
-
-data Bytes = Bytes
-  !(PrimArray Word8)
-  !Int
-  !Int
 
 -- | Exception encountered while attempting to interpret a series
 -- of bytes as ASCII-encoded text.
@@ -112,10 +108,10 @@ deriving instance Eq a => Eq (Utf8EndOfInput c a)
 deriving instance Show a => Show (Utf8EndOfInput c a)
 
 fromByteArray :: ByteArray -> Bytes
-fromByteArray x@(ByteArray y) = Bytes (PrimArray y) 0 (PM.sizeofByteArray x)
+fromByteArray x = Bytes x 0 (PM.sizeofByteArray x)
 
 fromPrimArray :: PrimArray Word8 -> Bytes
-fromPrimArray !x = Bytes x 0 (PM.sizeofPrimArray x)
+fromPrimArray !x@(PrimArray x#) = Bytes (ByteArray x#) 0 (PM.sizeofPrimArray x)
 
 -- | Strict left to right fold.
 foldl' :: (b -> Word8 -> b) -> b -> Bytes -> b
@@ -125,7 +121,9 @@ foldl' f z (Bytes arr s l) = go z s
   !end = s + l
   -- tail recursive; traverses array left to right
   go !acc !i
-    | i < end = let !x = PM.indexPrimArray arr i in go (f acc x) (i + 1)
+    | i < end =
+        let !x = PM.indexByteArray arr i :: Word8
+         in go (f acc x) (i + 1)
     | otherwise = acc
 
 -- | Strict left-associated fold over bytes.
@@ -136,7 +134,7 @@ foldlM' f z0 (Bytes arr s l) = go s z0
     !end = s + l
     go !i !acc1
       | i < end = do
-          let !x = PM.indexPrimArray arr i
+          let !x = PM.indexByteArray arr i :: Word8
           acc2 <- f acc1 x
           go (i + 1) acc2
       | otherwise = return acc1
@@ -152,7 +150,7 @@ foldlAscii' f z0 (Bytes arr s l) = go s z0
     !end = s + l
     go !i !acc1
       | i < end = do
-          let !x = PM.indexPrimArray arr i
+          let !x = PM.indexByteArray arr i :: Word8
           if x < 128
             then go (i + 1) (f acc1 (word8ToChar x))
             else Left (AsciiException i x)
@@ -208,14 +206,12 @@ indexUtf8 ::
   -> Int -- ^ End of bytes (not inclusive)
   -> Either (Utf8State ()) IndexChar
 {-# inline indexUtf8 #-}
-indexUtf8 (ByteArray barr) !i !end
+indexUtf8 !arr !i !end
   | i < end - 3 = first Utf8StateSequence (unsafeAdvanceChar4 arr i)
   | i == end - 3 = unsafeAdvanceChar3 arr i
   | i == end - 2 = unsafeAdvanceChar2 arr i
   | i == end - 1 = unsafeAdvanceChar1 arr i
   | otherwise = Left (Utf8StateEndOfInput (Utf8EndOfInput0 ()))
-  where
-  arr = PrimArray barr :: PrimArray Word8
 
 indexAscii ::
      ByteArray
@@ -227,7 +223,7 @@ indexAscii !arr !i = let x = PM.indexByteArray arr i in if x < (128 :: Word8)
 
 -- Internal function. Precondition: there is exactly one byte
 -- remaining in the slice of bytes.
-unsafeAdvanceChar1 :: PrimArray Word8 -> Int -> Either (Utf8State ()) IndexChar
+unsafeAdvanceChar1 :: ByteArray -> Int -> Either (Utf8State ()) IndexChar
 {-# INLINE unsafeAdvanceChar1 #-}
 unsafeAdvanceChar1 !arr !ix
   | oneByteChar firstByte = Right (IndexChar (ix + 1) (unsafeWordToChar (word8ToWord firstByte)))
@@ -239,17 +235,17 @@ unsafeAdvanceChar1 !arr !ix
       }
   where
   firstByte :: Word8
-  !firstByte = PM.indexPrimArray arr ix
+  !firstByte = PM.indexByteArray arr ix
 
 -- Internal function. Precondition: there are exactly two bytes
 -- remaining in the slice of bytes.
-unsafeAdvanceChar2 :: PrimArray Word8 -> Int -> Either (Utf8State ()) IndexChar
+unsafeAdvanceChar2 :: ByteArray -> Int -> Either (Utf8State ()) IndexChar
 {-# INLINE unsafeAdvanceChar2 #-}
 unsafeAdvanceChar2 !arr !ix
   | oneByteChar firstByte = Right (IndexChar (ix + 1) (unsafeWordToChar (word8ToWord firstByte)))
   | twoByteChar firstByte = first Utf8StateSequence (handleTwoByteChar arr ix firstByte)
   | threeByteChar firstByte || fourByteChar firstByte = do
-      let !secondByte = PM.indexPrimArray arr (ix + 1)
+      let !secondByte = PM.indexByteArray arr (ix + 1) :: Word8
       when (not (followingByte secondByte)) $ do
         Left $ Utf8StateSequence $ Utf8SequenceException
           { position = ix + 1
@@ -262,24 +258,24 @@ unsafeAdvanceChar2 !arr !ix
       }
   where
   firstByte :: Word8
-  !firstByte = PM.indexPrimArray arr ix
+  !firstByte = PM.indexByteArray arr ix
 
 -- Internal function. Precondition: there are exactly three bytes
 -- remaining in the slice of bytes.
-unsafeAdvanceChar3 :: PrimArray Word8 -> Int -> Either (Utf8State ()) IndexChar
+unsafeAdvanceChar3 :: ByteArray -> Int -> Either (Utf8State ()) IndexChar
 {-# INLINE unsafeAdvanceChar3 #-}
 unsafeAdvanceChar3 !arr !ix
   | oneByteChar firstByte = Right (IndexChar (ix + 1) (unsafeWordToChar (word8ToWord firstByte)))
   | twoByteChar firstByte = first Utf8StateSequence (handleTwoByteChar arr ix firstByte)
   | threeByteChar firstByte = first Utf8StateSequence (handleThreeByteChar arr ix firstByte)
   | fourByteChar firstByte = do
-      let !secondByte = PM.indexPrimArray arr (ix + 1)
+      let !secondByte = PM.indexByteArray arr (ix + 1) :: Word8
       when (not (followingByte secondByte)) $ do
         Left $ Utf8StateSequence $ Utf8SequenceException
           { position = ix + 1
           , context = Utf8Sequence2 firstByte secondByte
           }
-      let !thirdByte = PM.indexPrimArray arr (ix + 2)
+      let !thirdByte = PM.indexByteArray arr (ix + 2) :: Word8
       when (not (followingByte thirdByte)) $ do
         Left $ Utf8StateSequence $ Utf8SequenceException
           { position = ix + 2
@@ -292,11 +288,11 @@ unsafeAdvanceChar3 !arr !ix
       }
   where
   firstByte :: Word8
-  !firstByte = PM.indexPrimArray arr ix
+  !firstByte = PM.indexByteArray arr ix
 
 -- Internal function. Precondition: there are at least four bytes
 -- remaining in the ByteArray. That is: end - ix >= 4
-unsafeAdvanceChar4 :: PrimArray Word8 -> Int -> Either Utf8SequenceException IndexChar
+unsafeAdvanceChar4 :: ByteArray -> Int -> Either Utf8SequenceException IndexChar
 {-# INLINE unsafeAdvanceChar4 #-}
 unsafeAdvanceChar4 !arr !ix
   | oneByteChar firstByte =
@@ -304,19 +300,19 @@ unsafeAdvanceChar4 !arr !ix
   | twoByteChar firstByte = handleTwoByteChar arr ix firstByte
   | threeByteChar firstByte = handleThreeByteChar arr ix firstByte
   | fourByteChar firstByte = do
-      let !secondByte = PM.indexPrimArray arr (ix + 1)
+      let !secondByte = PM.indexByteArray arr (ix + 1) :: Word8
       when (not (followingByte secondByte)) $ do
         Left $ Utf8SequenceException
           { position = ix + 1
           , context = Utf8Sequence2 firstByte secondByte
           }
-      let !thirdByte = PM.indexPrimArray arr (ix + 2)
+      let !thirdByte = PM.indexByteArray arr (ix + 2) :: Word8
       when (not (followingByte thirdByte)) $ do
         Left $ Utf8SequenceException
           { position = ix + 2
           , context = Utf8Sequence3 firstByte secondByte thirdByte
           }
-      let !fourthByte = PM.indexPrimArray arr (ix + 3)
+      let !fourthByte = PM.indexByteArray arr (ix + 3) :: Word8
       when (not (followingByte fourthByte)) $ do
         Left $ Utf8SequenceException
           { position = ix + 3
@@ -331,19 +327,19 @@ unsafeAdvanceChar4 !arr !ix
       }
   where
   firstByte :: Word8
-  !firstByte = PM.indexPrimArray arr ix
+  !firstByte = PM.indexByteArray arr ix
 
 -- Does not do bounds checking.
-handleThreeByteChar :: PrimArray Word8 -> Int -> Word8 -> Either Utf8SequenceException IndexChar
+handleThreeByteChar :: ByteArray -> Int -> Word8 -> Either Utf8SequenceException IndexChar
 {-# INLINE handleThreeByteChar #-}
 handleThreeByteChar !arr !ix !firstByte = do
-  let !secondByte = PM.indexPrimArray arr (ix + 1)
+  let !secondByte = PM.indexByteArray arr (ix + 1) :: Word8
   when (not (followingByte secondByte)) $ do
     Left $ Utf8SequenceException
       { position = ix + 1
       , context = Utf8Sequence2 firstByte secondByte
       }
-  let !thirdByte = PM.indexPrimArray arr (ix + 2)
+  let !thirdByte = PM.indexByteArray arr (ix + 2) :: Word8
   when (not (followingByte thirdByte)) $ do
     Left $ Utf8SequenceException
       { position = ix + 2
@@ -354,10 +350,10 @@ handleThreeByteChar !arr !ix !firstByte = do
     (charFromThreeBytes firstByte secondByte thirdByte)
 
 -- Does not do bounds checking.
-handleTwoByteChar :: PrimArray Word8 -> Int -> Word8 -> Either Utf8SequenceException IndexChar
+handleTwoByteChar :: ByteArray -> Int -> Word8 -> Either Utf8SequenceException IndexChar
 {-# INLINE handleTwoByteChar #-}
 handleTwoByteChar !arr !ix !firstByte = do
-  let !secondByte = PM.indexPrimArray arr (ix + 1)
+  let !secondByte = PM.indexByteArray arr (ix + 1) :: Word8
   if | followingByte secondByte -> Right $ IndexChar
          (ix + 2)
          (charFromTwoBytes firstByte secondByte)

@@ -4,16 +4,20 @@
 {-# language BangPatterns #-}
 
 module Automata.Dfst.Compact.Unboxed
-  ( CompactDfst
+  ( -- * Types
+    CompactDfst
+    -- * Functions
   , fromLifted
   , evaluateUtf8
   , evaluateAscii
+    -- * Properties
+  , states
   ) where
 
 import Automata.Internal.Transducer (MotionCompactDfst(..))
 import Automata.Dfst.Compact (Ranged(..))
 import Data.Primitive (PrimArray(..),ByteArray(..),Prim,Array)
-import Data.Bytes (Bytes(..),IndexChar(..),Utf8State(..),Utf8Exception,AsciiException)
+import Data.Bytes (Bytes(..),IndexChar(..),Utf8Exception,AsciiException)
 import Data.Bool (bool)
 import Data.Word (Word8)
 import GHC.Exts (Int(I#),Int#,ByteArray#)
@@ -21,15 +25,13 @@ import qualified Data.Bytes as B
 import qualified Data.Primitive.Contiguous as C
 import qualified Automata.Internal.Transducer as I
 import qualified Data.Map.Interval.DBTSUL as DM
-import qualified Data.Set.Lifted as SL
 import qualified Data.Set.Unboxed as SU
 import qualified Data.Primitive as PM
 
 data CompactDfst t m = CompactDfst
-  { compactDfstTransition :: !(Array (TransitionCompactDfst t))
-  , compactDfstFinal :: !(SU.Set Int)
-  , compactDfstOutput :: !(Array m)
-  }
+  !(Array (TransitionCompactDfst t)) -- transitions
+  !(SU.Set Int) -- finals
+  !(Array m) -- output tokens
 
 data TransitionCompactDfst t
   = TransitionCompactDfstSingle !(CompactSequence t)
@@ -41,6 +43,13 @@ data CompactSequence t = CompactSequence
   !Int -- destination after veering off path
   !Int -- output (as an index) from starting straight-and-narrow path
   !Int -- output (as an index) after veering off path
+
+-- | The number of states. Since a 'CompactDfst' is not backed
+-- by a true graph (rather, a graph-like structure), this
+-- number lacks a good theoretical foundation, but it is still
+-- a useful approximation of the size.
+states :: CompactDfst t m -> Int
+states (CompactDfst t _ _) = PM.sizeofArray t
 
 fromLifted :: Prim t => I.CompactDfst t m -> CompactDfst t m
 fromLifted (I.CompactDfst ts fs outs) = CompactDfst
@@ -54,15 +63,12 @@ fromLiftedTransition (I.TransitionCompactDfstSingle (I.CompactSequence arr a b c
 fromLiftedTransition (I.TransitionCompactDfstMultiple x) =
   TransitionCompactDfstMultiple (DM.fromLiftedLifted x)
 
-primArrayToByteArray :: PrimArray Word8 -> ByteArray
-primArrayToByteArray (PrimArray a) = ByteArray a
-
 evaluateUtf8 :: forall m.
      CompactDfst Char m
   -> Bytes
   -> Either Utf8Exception (Maybe (Array (Ranged m)))
 evaluateUtf8 (CompactDfst transitions finals outputs) (Bytes tokens s0 len0) =
-  case B.indexUtf8 (primArrayToByteArray tokens) s0 end of
+  case B.indexUtf8 tokens s0 end of
     Left st -> case B.terminate st of
       Left err -> Left err
       Right () -> Right $! bool Nothing (Just mempty) (SU.member 0 finals)
@@ -79,7 +85,7 @@ evaluateUtf8 (CompactDfst transitions finals outputs) (Bytes tokens s0 len0) =
   where
   !end = s0 + len0
   goSequence :: PrimArray Char -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> Int -> [Ranged m] -> Int -> Either Utf8Exception (Maybe (Array (Ranged m)))
-  goSequence !string !stringIx !stringSz !successState !failureState !failureTokenIndex !ix !outputSz !nextOutputTokenIndex !nextOutputStart !output !tokenIxA = case B.indexUtf8 (primArrayToByteArray tokens) tokenIxA end of
+  goSequence !string !stringIx !stringSz !successState !failureState !failureTokenIndex !ix !outputSz !nextOutputTokenIndex !nextOutputStart !output !tokenIxA = case B.indexUtf8 tokens tokenIxA end of
     Left st -> case B.terminate st of
       Left err -> Left err
       Right () -> if stringIx < stringSz
@@ -101,7 +107,7 @@ evaluateUtf8 (CompactDfst transitions finals outputs) (Bytes tokens s0 len0) =
     {-# INLINE r #-}
     r = Ranged nextOutputStart (ix - nextOutputStart) (PM.indexArray outputs nextOutputTokenIndex)
   goUnknown :: Int -> Int -> Int -> Int -> Int -> [Ranged m] -> Int -> Either Utf8Exception (Maybe (Array (Ranged m)))
-  goUnknown !state !ix !outputSz !nextOutputTokenIndex !nextOutputStart !output !tokenIxA = case B.indexUtf8 (primArrayToByteArray tokens) tokenIxA end of
+  goUnknown !state !ix !outputSz !nextOutputTokenIndex !nextOutputStart !output !tokenIxA = case B.indexUtf8 tokens tokenIxA end of
     Left st -> case B.terminate st of
       Left err -> Left err
       Right () -> if SU.member state finals
@@ -138,7 +144,7 @@ evaluateAscii :: forall m.
 evaluateAscii (CompactDfst transitions finals outputs) (Bytes tokens s0 len0) =
   if s0 >= end
     then Right $! bool Nothing (Just mempty) (SU.member 0 finals)
-    else case B.indexAscii (primArrayToByteArray tokens) s0 of
+    else case B.indexAscii tokens s0 of
       Left err -> Left err
       Right token0 -> case PM.indexArray transitions 0 of
         TransitionCompactDfstSingle (CompactSequence string successState failureState successToken failureToken) ->
@@ -164,7 +170,7 @@ evaluateAscii (CompactDfst transitions finals outputs) (Bytes tokens s0 len0) =
       else if SU.member (I# successState) finals
         then let !r' = r in Right $! Just $! C.unsafeFromListReverseN (I# outputSz + 1) (r' : output)
         else Right Nothing
-    else case B.indexAscii (primArrayToByteArray tokens) (I# tokenIxA) of
+    else case B.indexAscii tokens (I# tokenIxA) of
       Left err -> Left err
       Right tokenB -> if I# stringIx < I# stringSz
         then if PM.indexPrimArray (PrimArray string :: PrimArray Char) (I# stringIx) == tokenB
@@ -182,7 +188,7 @@ evaluateAscii (CompactDfst transitions finals outputs) (Bytes tokens s0 len0) =
     then if SU.member (I# state) finals
       then let !r' = r in Right $! Just $! C.unsafeFromListReverseN (I# outputSz + 1) (r' : output)
       else Right Nothing
-    else case B.indexAscii (primArrayToByteArray tokens) (I# tokenIxA) of
+    else case B.indexAscii tokens (I# tokenIxA) of
       Left err -> Left err
       Right tokenB -> case PM.indexArray transitions (I# state) of
         TransitionCompactDfstSingle (CompactSequence string successState failureState successTokenIndex failureTokenIndex) ->

@@ -54,9 +54,9 @@ run fromStartState =
     Builder f -> case f 0 [] [] [] of
       Result totalStates edges epsilons final _ ->
         let ts0 = runST $ do
-              transitions <- C.replicateM totalStates (TransitionNfsa SU.empty (DM.pure SU.empty))
-              outbounds <- C.replicateM totalStates []
-              epsilonArr <- C.replicateM totalStates []
+              transitions <- C.replicateMutable totalStates (TransitionNfsa SU.empty (DM.pure SU.empty))
+              outbounds <- C.replicateMutable totalStates []
+              epsilonArr <- C.replicateMutable totalStates []
               for_ epsilons $ \(Epsilon source destination) -> do
                 edgeDests0 <- C.read epsilonArr source
                 let !edgeDests1 = destination : edgeDests0

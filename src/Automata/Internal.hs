@@ -33,11 +33,10 @@ module Automata.Internal
   , ex1
   ) where
 
-import Control.Applicative (liftA2)
 import Control.Monad (forM_,(<=<))
 import Control.Monad.ST (ST,runST)
 import Control.Monad.Trans.Class (lift)
-import Data.Foldable (foldl',toList)
+import Data.Foldable (toList)
 import Data.Map (Map)
 import Data.Primitive (PrimArray,MutablePrimArray,MutableArray)
 import Data.Maybe (fromMaybe,isNothing,mapMaybe)
@@ -46,9 +45,6 @@ import Data.Semigroup (First(..))
 import Data.Semiring (Semiring)
 import Data.Set (Set)
 import Data.STRef (STRef,newSTRef,readSTRef,writeSTRef)
-import GHC.IO (unsafeIOToST)
-
-import Debug.Trace
 
 import qualified Data.List as L
 import qualified Data.Foldable as F
@@ -58,7 +54,6 @@ import qualified Data.Map.Strict as M
 import qualified Control.Monad.Trans.State.Strict as State
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Primitive.Contiguous as C
-import qualified Data.Primitive as PM
 import qualified Data.Map.Lifted.Lifted as MLL
 import qualified GHC.Exts as E
 import qualified Data.Semiring
@@ -139,7 +134,7 @@ append (Nfsa t1 f1) (Nfsa t2 f2) =
       t4 = fmap (\(TransitionNfsa eps consume) -> TransitionNfsa eps (DM.mapBijection (\states -> if SU.null (SU.intersection states f1) then states else states <> transitionNfsaEpsilon (C.index t3 0)) consume)) t1
       !(# placeholder #) = C.index# t1 0
       t5 = runST $ do
-        m <- C.replicateM n3 placeholder
+        m <- C.replicateMutable n3 placeholder
         C.copy m 0 t4 0 n1
         C.copy m n1 t3 0 n2
         flip SU.traverse_ f1 $ \ix -> do
@@ -272,7 +267,7 @@ minimizeMapping t0 f0
           description = "[original_state_cardinality=" ++ show (C.size t1) ++ "][new_transitions_cardinality=" ++ show (C.size newTransitions0) ++ "][inverted_transitions=" ++ show (DM.elems invertedTransitions) ++ "][initial_canonization=" ++ show initialCanonization ++ "][canonization=" ++ show canonization ++ "][assignments=" ++ show assignments ++ "][partitions=" ++ show partitions1 ++ "][new_transitions_0=" ++ show (fmap DM.elems newTransitions0) ++ "][t1=" ++ show (fmap DM.elems t1) ++ "]"
           newTransitions1 :: Array (DM.Map t Int) = C.map' (DM.mapBijection (\s -> fromMaybe (error ("Automata.Nfsa.minimize: canonization missing state [state=" ++ show s ++ "]" ++ description)) (M.lookup s canonization))) newTransitions0
           newTransitions2 = runST $ do
-            marr <- C.replicateM (M.size canonization) (error ("Automata.Nfsa.minimize: uninitialized element " ++ description))
+            marr <- C.replicateMutable (M.size canonization) (error ("Automata.Nfsa.minimize: uninitialized element " ++ description))
             flip C.itraverse_ newTransitions1 $ \ix dm -> C.write marr (fromMaybe (error ("Automata.Nfsa.minimize: missing state while rearranging [state=" ++ show ix ++ "]" ++ description)) (M.lookup ix canonization)) dm
             C.unsafeFreeze marr
           newAcceptingStates = foldMap (maybe SU.empty SU.singleton . (flip M.lookup canonization <=< flip M.lookup assignments)) f1
@@ -285,7 +280,7 @@ minimizeMapping t0 f0
   t1' :: Array (DM.Map t Int)
   t1' = C.map' (DM.mapBijection (\s -> fromMaybe (error "Automata.Nfsa.minimize: t1 prime") (M.lookup s initialCanonization))) t0
   t1 = runST $ do
-    marr <- C.replicateM (M.size initialCanonization) (error "Automata.Nfsa.minimize: t1 uninitialized element")
+    marr <- C.replicateMutable (M.size initialCanonization) (error "Automata.Nfsa.minimize: t1 uninitialized element")
     flip C.itraverse_ t1' $ \ix dm -> case M.lookup ix initialCanonization of
       Nothing -> return ()
       Just newIx -> C.write marr newIx dm
@@ -441,7 +436,7 @@ unionNfsa (Nfsa t1 f1) (Nfsa t2 f2) = Nfsa
       -- This replicated transition metadata only ends up being
       -- the transition for the start state. At all other indices,
       -- the value is overridden.
-      m <- C.replicateM (n1 + n2 + 1)
+      m <- C.replicateMutable (n1 + n2 + 1)
         ( TransitionNfsa
           (mconcat
             [ SU.mapMonotonic (+1) (transitionNfsaEpsilon (C.index t1 0))

@@ -80,12 +80,12 @@ data Dfst t m = Dfst
   , dfstFinal :: !(SU.Set Int)
     -- ^ A string that ends in any of these set of states is
     --   considered to have been accepted by the grammar.
-  } deriving (Eq,Show,Foldable)
+  } deriving (Eq,Show)
 
 data MotionDfst m = MotionDfst
   { motionDfstState :: !Int
   , motionDfstOutput :: !m
-  } deriving (Eq,Show,Foldable)
+  } deriving (Eq,Show)
 
 -- | A nondeterministic finite state transducer. The @t@ represents the input token on
 -- which a transition occurs. The @m@ represents the output token that
@@ -132,11 +132,11 @@ rejection = Nfst
 union :: (Bounded t, Ord m) => Nfst t m -> Nfst t m -> Nfst t m
 union (Nfst t1 f1) (Nfst t2 f2) = Nfst
   ( runST $ do
-      m <- C.replicateM (n1 + n2 + 1)
+      m <- C.replicateMutable (n1 + n2 + 1)
         ( TransitionNfst
           (mconcat
             [ SU.mapMonotonic (+1) (transitionNfstEpsilon (C.index t1 0))
-            , SU.mapMonotonic (\x -> 1 + n1) (transitionNfstEpsilon (C.index t2 0))
+            , SU.mapMonotonic (\x -> 1 + n1 + x) (transitionNfstEpsilon (C.index t2 0))
             , SU.tripleton 0 1 (1 + n1)
             ]
           )

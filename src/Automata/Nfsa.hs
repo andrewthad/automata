@@ -21,18 +21,11 @@ module Automata.Nfsa
   ) where
 
 import Automata.Internal (Nfsa(..),Dfsa(..),TransitionNfsa(..),toDfsa)
-import Data.Semigroup (First(..))
-import Control.Monad.Trans.State.Strict (State)
-import Data.Set (Set)
-import Data.Map (Map)
-import Control.Monad.ST (runST)
-import Data.Primitive (Array,indexArray)
 import Data.Foldable (foldl')
 
 import qualified Automata.Internal as AI
 import qualified Data.Set.Unboxed as SU
 import qualified Data.Map.Interval.DBTSLL as DM
-import qualified Data.Map.Unboxed.Lifted as MUL
 import qualified Data.Primitive.Contiguous as C
 
 fromDfsa :: Dfsa t -> Nfsa t

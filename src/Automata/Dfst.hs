@@ -260,8 +260,8 @@ internalBuild :: forall t m. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
   => Int -> [Edge t m] -> [Int] -> Int -> Dfst t m
 internalBuild totalStates edges final def = 
   let ts0 = runST $ do
-        theTransitions <- C.replicateM totalStates (DM.pure Nothing)
-        outbounds <- C.replicateM totalStates []
+        theTransitions <- C.replicateMutable totalStates (DM.pure Nothing)
+        outbounds <- C.replicateMutable totalStates []
         for_ edges $ \(Edge source destination lo hi output) -> do
           edgeDests0 <- C.read outbounds source
           let !edgeDests1 = EdgeDest destination lo hi output : edgeDests0

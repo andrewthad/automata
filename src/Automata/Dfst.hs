@@ -114,9 +114,9 @@ rejection = Dfst (C.singleton (DM.pure (MotionDfst 0 mempty))) SU.empty
 -- this function because of pass that discards output.
 union :: forall t m. (Ord t, Bounded t, Enum t, Monoid m)
   => Dfst t m -> Dfst t m -> Dfst t m
-union a@(Dfst ax _) b@(Dfst bx _) =
+union a@(Dfst _ax _) b@(Dfst _bx _) =
   let (mapping, dfsa) = composeMapping (||) (unsafeToDfsa a) (unsafeToDfsa b)
-   in unionCommon a b dfsa mapping 
+   in unionCommon a b dfsa mapping
 
 -- unions :: forall t m. (Ord t, Bounded t, Enum t, Monoid m, Foldable f)
 --   => f (Dfst t m) -> Dfst t m
@@ -216,7 +216,7 @@ state :: Builder t m s (State s)
 state = Builder $ \i edges final ->
   Result (i + 1) edges final (State i)
 
--- | Mark a state as being an accepting state. 
+-- | Mark a state as being an accepting state.
 accept :: State s -> Builder t m s ()
 accept (State n) = Builder $ \i edges final -> Result i edges (n : final) ()
 
@@ -258,7 +258,7 @@ build fromStartState =
 
 internalBuild :: forall t m. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
   => Int -> [Edge t m] -> [Int] -> Int -> Dfst t m
-internalBuild totalStates edges final def = 
+internalBuild totalStates edges final def =
   let ts0 = runST $ do
         theTransitions <- C.replicateMutable totalStates (DM.pure Nothing)
         outbounds <- C.replicateMutable totalStates []
@@ -267,7 +267,7 @@ internalBuild totalStates edges final def =
           let !edgeDests1 = EdgeDest destination lo hi output : edgeDests0
           C.write outbounds source edgeDests1
         (outbounds' :: Array [EdgeDest t m]) <- C.unsafeFreeze outbounds
-        flip C.imapMutable' theTransitions $ \i _ -> 
+        flip C.imapMutable' theTransitions $ \i _ ->
           let dests = C.index outbounds' i
            in mconcat
                 ( L.map
@@ -280,7 +280,7 @@ internalBuild totalStates edges final def =
    in Dfst (fmap (DM.map (maybe (MotionDfst def mempty) getLast)) ts0) (SU.fromList final)
 
 -- collapse :: Dfst t m -> Dfst t m
--- collapse = MotionDfst 
+-- collapse = MotionDfst
 
 -- Convert a DFST to a DFSA. However, the DFSA is not necessarily minimal, so
 -- equality on it is incorrect. Its states have a one-to-one mapping with the

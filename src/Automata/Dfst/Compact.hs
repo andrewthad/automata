@@ -21,25 +21,19 @@ module Automata.Dfst.Compact
 
 import Prelude hiding (map)
 
-import Automata.Internal (State(..),Dfsa(..),composeMapping)
 import Automata.Internal.Transducer (MotionCompactDfst(..))
-import Automata.Internal.Transducer (CompactDfst(..),Dfst(..),MotionDfst(..),Edge(..),EdgeDest(..),CompactSequence(..),TransitionCompactDfst(..))
-import Control.Applicative (liftA2)
+import Automata.Internal.Transducer (CompactDfst(..),Dfst(..),MotionDfst(..),CompactSequence(..),TransitionCompactDfst(..))
 import Control.Monad.ST (runST)
 import Control.Monad (forM_)
-import Data.Foldable (foldl',for_)
 import Data.Map.Strict (Map)
 import Data.Maybe (fromMaybe,isJust)
-import Data.Primitive (Array,indexArray,sizeofArray)
+import Data.Primitive (Array,sizeofArray)
 import Data.Semigroup (Last(..))
-import Data.Set (Set)
-import Data.ByteString (ByteString)
 import Data.Bool (bool)
 import Data.Monoid (Sum(..))
 import Data.Foldable (foldlM)
 import Control.Monad.Trans.State.Strict (get,put,runState)
 
-import qualified Data.ByteString.Char8 as BC
 import qualified Data.Foldable as F
 import qualified Data.DisjointMap as DJM
 import qualified Data.List as L
@@ -48,7 +42,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.Primitive as P
 import qualified Data.Primitive as PM
 import qualified Data.Primitive.Contiguous as C
-import qualified Data.Set as S
 import qualified Data.Set.Lifted as SL
 import qualified Data.Set.Unboxed as SU
 import qualified GHC.Exts as E
@@ -130,12 +123,12 @@ compact (Dfst transitions finals) =
           (M.singleton 0 0, M.singleton 0 0)
           (DJM.toLists collapseFinal)
         foldlM
-          (\(oldToNew,newToOld) old -> if old == 0 || isJust (M.lookup old (fst m1))
-            then pure (oldToNew,newToOld)
+          (\(oldToNew',newToOld') old -> if old == 0 || isJust (M.lookup old (fst m1))
+            then pure (oldToNew',newToOld')
             else do
               new <- get
               put (new + 1)
-              pure (M.insert old new oldToNew, M.insert new old newToOld)
+              pure (M.insert old new oldToNew', M.insert new old newToOld')
           ) m1 (enumFromTo 0 (PM.sizeofArray transitions - 1))
       newTransitions = runST $ do
         theStates <- C.new totalStates
@@ -252,7 +245,7 @@ dotNodes n fs = if n >= 0
   else []
 
 dotSourceEdges :: (Bounded t, Enum t)
-  => (t -> t -> m -> String) -> Array m -> Int 
+  => (t -> t -> m -> String) -> Array m -> Int
   -> DM.Map t MotionCompactDfst -> [String]
 dotSourceEdges makeLabel outputs src dsts = DM.foldrWithKey
   (\lo hi motion xs -> dotEdge makeLabel outputs src lo hi motion : xs) [] dsts

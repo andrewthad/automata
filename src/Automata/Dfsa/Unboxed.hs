@@ -14,13 +14,10 @@ module Automata.Dfsa.Unboxed
 import Data.Bytes (Bytes,AsciiException,Utf8Exception)
 import Data.Primitive (Array,PrimArray,Prim)
 import Data.Foldable (foldl')
-import Data.Word (Word8)
-import GHC.Base (unsafeChr)
 
 import qualified Automata.Internal as I
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set.Unboxed as SU
-import qualified Data.Map.Interval.DBTSLL as DML
 import qualified Data.Map.Interval.DBTSUU as DMU
 import qualified Data.Bytes as Bytes
 

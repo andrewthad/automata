@@ -176,14 +176,14 @@ internalBuild totalStates edges final def =
                 )
         C.unsafeFreeze transitions
    in minimize (fmap (DM.map (maybe def getLast)) ts) (SU.fromList final)
-  
+
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.
 state :: Builder t s (State s)
 state = Builder $ \i edges final ->
   Result (i + 1) edges final (State i)
 
--- | Mark a state as being an accepting state. 
+-- | Mark a state as being an accepting state.
 accept :: State s -> Builder t s ()
 accept (State n) = Builder $ \i edges final -> Result i edges (n : final) ()
 

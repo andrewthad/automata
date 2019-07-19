@@ -16,10 +16,9 @@ module Automata.Dfst.Compact.Unboxed
 
 import Automata.Internal.Transducer (MotionCompactDfst(..))
 import Automata.Dfst.Compact (Ranged(..))
-import Data.Primitive (PrimArray(..),ByteArray(..),Prim,Array)
+import Data.Primitive (PrimArray(..),Prim,Array)
 import Data.Bytes (Bytes(..),IndexChar(..),Utf8Exception,AsciiException)
 import Data.Bool (bool)
-import Data.Word (Word8)
 import GHC.Exts (Int(I#),Int#,ByteArray#)
 import qualified Data.Bytes as B
 import qualified Data.Primitive.Contiguous as C

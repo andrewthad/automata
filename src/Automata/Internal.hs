@@ -12,7 +12,7 @@ module Automata.Internal
     -- * Builder Types
   , State(..)
   , Epsilon(..)
-    -- * NFA Functions 
+    -- * NFA Functions
   , toDfsa
   , toDfsaMapping
   , append
@@ -75,19 +75,19 @@ data Dfsa t = Dfsa
 data Nfsa t = Nfsa
   -- Some notes on the implementation and design:
   --
-  -- * You can transition to any non-negative number of states (including 0).
-  -- * There is only one start state.
-  -- * We use the Thompson encoding. This means that there is an epsilon
-  --   transition that consumes no input.
-  -- * We store the full epsilon closure for every state. This means that,
-  --   when evaluating the NFA, we do not ever need to compute the closure.
-  -- * There is no Eq instance for NFA. In general, this can take exponential
-  --   time. If you really need to do this, convert the NFA to a DFA.
+  -- You can transition to any non-negative number of states (including 0).
+  -- There is only one start state.
+  -- We use the Thompson encoding. This means that there is an epsilon
+  -- transition that consumes no input.
+  -- We store the full epsilon closure for every state. This means that,
+  -- when evaluating the NFA, we do not ever need to compute the closure.
+  -- There is no Eq instance for NFA. In general, this can take exponential
+  -- time. If you really need to do this, convert the NFA to a DFA.
   --
   -- Invariants:
-  -- 
-  -- * The start state is always the state at position 0.
-  -- * The length of nfaTransition is given by nfaStates.
+  --
+  -- - The start state is always the state at position 0.
+  -- - The length of nfaTransition is given by nfaStates.
   { nfaTransition :: !(Array (TransitionNfsa t))
     -- ^ Given a state and transition, this field tells you what
     --   state to go to next. The length of this array must match
@@ -125,7 +125,7 @@ data Pairing = Pairing
   }
 
 append :: Nfsa t -> Nfsa t -> Nfsa t
-append (Nfsa t1 f1) (Nfsa t2 f2) = 
+append (Nfsa t1 f1) (Nfsa t2 f2) =
   let n1 = C.size t1
       n2 = C.size t2
       n3 = n1 + n2
@@ -146,7 +146,7 @@ append (Nfsa t1 f1) (Nfsa t2 f2) =
 
 nextIdentifier :: State.State Conversion Int
 nextIdentifier = do
-  Conversion n a b c <- State.get 
+  Conversion n a b c <- State.get
   State.put (Conversion (n + 1) a b c)
   return n
 
@@ -174,7 +174,7 @@ resolveSubset transitions s0 = do
         }
       return ident
     Just ident -> return ident
-  
+
 epsilonClosure :: Array (TransitionNfsa t) -> SU.Set Int -> SU.Set Int
 epsilonClosure s states = go states SU.empty where
   go new old = if new == old
@@ -229,7 +229,7 @@ minimize t0 f0 = snd (minimizeMapping t0 f0)
 minimizeMapping :: forall t. (Ord t, Bounded t, Enum t) => Array (DM.Map t Int) -> SU.Set Int -> (Map Int Int, Dfsa t)
 minimizeMapping t0 f0
   | C.size t0 == 0 = error "Automata.Internal: tried to minimize DFSA with states"
-  | S.null f1 = 
+  | S.null f1 =
       -- When there are no final states, the solution is trivial. The DFSA
       -- is equivalent to one with a single unaccepting state.
       (M.fromSet (\_ -> 0) (S.fromList (enumFromTo 0 (C.size t0 - 1))),rejection)
@@ -499,7 +499,7 @@ instance (Bounded t) => Semiring (Nfsa t) where
   times = append
   zero = rejectionNfsa
   one = empty
-  
+
 data Epsilon = Epsilon !Int !Int
 
 newtype State s = State Int
@@ -583,7 +583,7 @@ newPartitions !total = do
   partitionList <- newSTRef [p0]
   elementToPartition <- PM.newArray total p0
   pure (Partitions total counter partitionList elementToPartition elementToIndex, p0)
-  
+
 -- In the returned tuples, the first element is the already-existing partition
 -- (which may have shrunk) and the second element is the newly-created partition.
 splitPartitions :: forall s. Partitions s -> SU.Set Int -> ST s [(Partition s,Partition s)]
@@ -608,7 +608,7 @@ splitPartitions (Partitions total counter partitionList elementToPartition eleme
       -- Remove the element from the original partition. To do
       -- this, we must look up its position, move the last element
       -- in the partition into this position and then update the
-      -- position of what was previously the last element. 
+      -- position of what was previously the last element.
       Metadata origSz origElems <- readSTRef mreforiginal
       origLast <- PM.readPrimArray origElems (origSz - 1)
       origIx <- PM.readPrimArray elementToIndex x

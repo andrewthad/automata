@@ -241,8 +241,8 @@ minimizeMapping t0 f0
       let !partitions0 = runST $ do
              (ps,_) <- newPartitions (C.size t1)
              -- This might behave incorrectly when either:
-             -- * There are no final states.
-             -- * All states are final states.
+             -- 1. There are no final states.
+             -- 2. All states are final states.
              -- We guard against these cases elsewhere since they are
              -- easy to check for.
              splitPartitions ps (SU.fromList (S.toList f1)) >>= \case

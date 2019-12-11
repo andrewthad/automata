@@ -36,24 +36,26 @@ library
     Automata.Dfsa.Unboxed
     Automata.Nfsa
     Automata.Nfsa.Builder
-    Automata.Internal
-    Automata.Internal.Transducer
     Automata.Nfst
     Automata.Dfst
     Automata.Dfst.Compact
     Automata.Dfst.Compact.Unboxed
     Data.Bytes
+  other-modules:
+    Automata.Internal
+    Automata.Internal.Transducer
+    Automata.Internal.Partition
   build-depends:
     , base >=4.10.1 && <5
-    , byteslice >= 0.1 && <0.2
-    , bytestring >= 0.10.8
-    , primitive >= 0.7 && < 0.8
-    , primitive-containers >= 0.4.1 && < 0.5
-    , containers >= 0.5.9 && < 0.7
-    , contiguous >= 0.4 && < 0.6
+    , byteslice >=0.1 && <0.3
+    , bytestring >=0.10.8
+    , containers >=0.5.9 && <0.7
+    , contiguous >=0.4 && <0.6
+    , disjoint-containers >= 0.2.4 && <0.3
+    , primitive >=0.7 && <0.8
+    , primitive-containers >=0.4.1 && <0.5
     , semirings >= 0.3.1.1
     , transformers >= 0.5.5 && < 0.6
-    , disjoint-containers >= 0.2.4 && < 0.3
   ghc-options: -Wall -O2
   -- ghc-options: -ddump-to-file -ddump-simpl -dsuppress-all
   default-language: Haskell2010

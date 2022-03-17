@@ -1,7 +1,3 @@
-{-# language BangPatterns #-}
-{-# language LambdaCase #-}
-{-# language MagicHash #-}
-{-# language UnboxedTuples #-}
 {-# language ScopedTypeVariables #-}
 
 module Automata.Nfsa

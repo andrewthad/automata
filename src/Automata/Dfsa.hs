@@ -1,7 +1,6 @@
 {-# language BangPatterns #-}
 {-# language DeriveFunctor #-}
 {-# language DerivingStrategies #-}
-{-# language MagicHash #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language UnboxedTuples #-}

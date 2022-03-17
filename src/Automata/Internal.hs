@@ -39,13 +39,11 @@ import Control.Monad.ST (ST,runST)
 import Control.Monad.Trans.Class (lift)
 import Data.Foldable (toList)
 import Data.Map (Map)
-import Data.Primitive (PrimArray,MutablePrimArray,MutableArray)
 import Data.Maybe (fromMaybe,isNothing,mapMaybe)
 import Data.Primitive (Array,indexArray)
 import Data.Semigroup (First(..))
 import Data.Semiring (Semiring)
 import Data.Set (Set)
-import Data.STRef (STRef,newSTRef,readSTRef,writeSTRef)
 
 import qualified Data.List as L
 import qualified Data.Foldable as F

@@ -30,7 +30,7 @@ import qualified Automata.Dfsa.Unboxed as UnboxedDfsa
 import qualified Automata.Dfst as Dfst
 import qualified Automata.Dfst.Compact as CDfst
 import qualified Automata.Dfst.Compact.Unboxed as CUDfst
-import qualified Automata.Nfsa.Builder as B
+import qualified Automata.Nfsa as B
 import qualified Data.Bytes as Bytes
 import qualified Data.Set as S
 import qualified Data.List as L
@@ -259,7 +259,7 @@ instance (Arbitrary t, Bounded t, Enum t, Ord t) => Arbitrary (Nfsa t) where
       <*> QC.arbitrary
       <*> QC.arbitrary
       <*> QC.frequency [(975,pure False),(25,pure True)]
-    return $ B.run $ \s0 -> do
+    return $ B.build $ \s0 -> do
       states <- fmap (s0:) (replicateM states B.state)
       B.accept (states L.!! 1)
       forM_ ts $ \(source,dest,a,b,epsilon) -> do
@@ -276,7 +276,7 @@ instance (Ord t, Bounded t, Enum t) => Eq (Nfsa t) where
   a == b = Nfsa.toDfsa a == Nfsa.toDfsa b
 
 ex1 :: Nfsa D
-ex1 = B.run $ \s0 -> do
+ex1 = B.build $ \s0 -> do
   s1 <- B.state
   B.accept s1
   B.transition D1 D2 s0 s1
@@ -284,7 +284,7 @@ ex1 = B.run $ \s0 -> do
   B.transition D3 D3 s1 s1
 
 ex2 :: Nfsa D
-ex2 = B.run $ \s0 -> do
+ex2 = B.build $ \s0 -> do
   s1 <- B.state
   B.accept s1
   B.transition D1 D2 s0 s1
@@ -294,7 +294,7 @@ ex2 = B.run $ \s0 -> do
   B.transition D3 D3 s1 s1
 
 ex3 :: Nfsa D
-ex3 = B.run $ \s0 -> do
+ex3 = B.build $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
   B.accept s2
@@ -305,7 +305,7 @@ ex3 = B.run $ \s0 -> do
   B.epsilon s2 s1
 
 ex4 :: Nfsa D
-ex4 = B.run $ \s0 -> do
+ex4 = B.build $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
   B.accept s1
@@ -317,7 +317,7 @@ ex4 = B.run $ \s0 -> do
   B.transition D3 D3 s2 s2
 
 ex5 :: Nfsa D
-ex5 = B.run $ \s0 -> do
+ex5 = B.build $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
   B.accept s2
@@ -326,7 +326,7 @@ ex5 = B.run $ \s0 -> do
 
 -- Note: ex5 and ex6 accept the same inputs.
 ex6 :: Nfsa D
-ex6 = B.run $ \s0 -> do
+ex6 = B.build $ \s0 -> do
   -- s3, s4, and s5 are unreachable
   s3 <- B.state
   s4 <- B.state
@@ -342,7 +342,7 @@ ex6 = B.run $ \s0 -> do
   B.transition D1 D2 s5 s3
 
 ex7 :: Nfsa D
-ex7 = B.run $ \s0 -> do
+ex7 = B.build $ \s0 -> do
   s1 <- B.state
   s2 <- B.state
   s3 <- B.state

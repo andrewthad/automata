@@ -35,7 +35,6 @@ library
     Automata.Dfsa
     Automata.Dfsa.Unboxed
     Automata.Nfsa
-    Automata.Nfsa.Builder
     Automata.Nfst
     Automata.Dfst
     Automata.Dfst.Compact

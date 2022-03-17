@@ -1,5 +1,4 @@
 {-# language BangPatterns #-}
-{-# language DeriveFoldable #-}
 
 module Automata.Internal.Transducer
   ( Nfst(..)
@@ -18,8 +17,7 @@ module Automata.Internal.Transducer
   ) where
 
 import Control.Monad.ST (runST)
-import Data.Primitive (Array)
-import Data.Primitive (indexArray)
+import Data.Primitive (Array, indexArray)
 import qualified Data.Primitive as PM
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Set.Unboxed as SU

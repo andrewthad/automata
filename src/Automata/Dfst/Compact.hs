@@ -1,7 +1,5 @@
 {-# language BangPatterns #-}
-{-# language DeriveFunctor #-}
 {-# language DerivingStrategies #-}
-{-# language MagicHash #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language UnboxedTuples #-}
@@ -21,8 +19,7 @@ module Automata.Dfst.Compact
 
 import Prelude hiding (map)
 
-import Automata.Internal.Transducer (MotionCompactDfst(..))
-import Automata.Internal.Transducer (CompactDfst(..),Dfst(..),MotionDfst(..),CompactSequence(..),TransitionCompactDfst(..))
+import Automata.Internal.Transducer (MotionCompactDfst(..), CompactDfst(..),Dfst(..),MotionDfst(..),CompactSequence(..),TransitionCompactDfst(..))
 import Control.Monad.ST (runST)
 import Control.Monad (forM_)
 import Data.Map.Strict (Map)

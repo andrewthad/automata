@@ -1,7 +1,6 @@
 {-# language BangPatterns #-}
 {-# language DeriveFunctor #-}
 {-# language DerivingStrategies #-}
-{-# language MagicHash #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language UnboxedTuples #-}
@@ -23,6 +22,7 @@ module Automata.Dfst
   , rejection
     -- * Builder
     -- ** Types
+  , BuilderT
   , Builder
   , State
     -- ** Functions
@@ -59,6 +59,8 @@ import qualified Data.Semigroup as SG
 import qualified Data.Set as S
 import qualified Data.Set.Unboxed as SU
 import qualified GHC.Exts as E
+import Data.Functor.Identity (Identity )
+import Control.Monad.Trans.Class (MonadTrans (lift))
 
 -- TODO: Minimize DFST using Choffrut's algorithm as described in
 -- https://www.irif.fr/~jep/PDF/Exposes/Sequential.pdf. Original
@@ -186,78 +188,87 @@ evaluateAscii (Dfst theTransitions finals) !tokens =
         then Just (C.unsafeFromListReverseN (BC.length tokens) allOutput)
         else Nothing
 
-newtype Builder t m s a = Builder (Int -> [Edge t m] -> [Int] -> Result t m a)
+newtype BuilderT t m s f a = BuilderT (Int -> [Edge t m] -> [Int] -> f (Result t m a))
   deriving stock (Functor)
+
+type Builder t m s a = BuilderT t m s Identity a
 
 data Result t m a = Result !Int ![Edge t m] ![Int] a
   deriving stock (Functor)
 
-instance Applicative (Builder t m s) where
-  pure a = Builder (\i es fs -> Result i es fs a)
-  Builder f <*> Builder g = Builder $ \i es fs -> case f i es fs of
-    Result i' es' fs' x -> case g i' es' fs' of
-      Result i'' es'' fs'' y -> Result i'' es'' fs'' (x y)
+instance Monad f => Applicative (BuilderT t m s f) where
+  pure a = BuilderT (\i es fs -> pure (Result i es fs a))
+  BuilderT f <*> BuilderT g = BuilderT $ \i es fs -> do
+    Result i' es' fs' x <- f i es fs
+    Result i'' es'' fs'' y <-g i' es' fs' 
+    pure $ Result i'' es'' fs'' (x y)
 
-instance Monad (Builder t m s) where
-  Builder f >>= g = Builder $ \i es fs -> case f i es fs of
-    Result i' es' fs' a -> case g a of
-      Builder g' -> g' i' es' fs'
+instance Monad f => Monad (BuilderT t m s f) where
+  BuilderT f >>= g = BuilderT $ \i es fs -> do
+    Result i' es' fs' a <- f i es fs
+    case g a of
+      BuilderT g' -> g' i' es' fs'
 
-instance Semigroup a => Semigroup (Builder t m s a) where
+
+instance MonadTrans (BuilderT t m s) where
+  lift m = BuilderT $ \i es is -> Result i es is <$> m
+
+instance (Monad f, Semigroup a) => Semigroup (BuilderT t m s f a) where
   (<>) = liftA2 (SG.<>)
 
-instance (Monoid a, Semigroup a) => Monoid (Builder t m s a) where
+instance (Monad f, Monoid a) => Monoid (BuilderT t m s f a) where
   mempty = pure mempty
   mappend = (SG.<>)
 
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.
-state :: Builder t m s (State s)
-state = Builder $ \i edges final ->
-  Result (i + 1) edges final (State i)
+state :: Monad f => BuilderT t m s f (State s)
+state = BuilderT $ \i edges final ->
+  pure (Result (i + 1) edges final (State i))
 
 -- | Mark a state as being an accepting state.
-accept :: State s -> Builder t m s ()
-accept (State n) = Builder $ \i edges final -> Result i edges (n : final) ()
+accept :: Monad f => State s -> BuilderT t m s f ()
+accept (State n) = BuilderT $ \i edges final -> pure (Result i edges (n : final) ())
 
 -- | Add a transition from one state to another when the input token
 --   is inside the inclusive range. If multiple transitions from
 --   a state are given, the last one given wins.
 transition ::
+  Monad f =>
      t -- ^ inclusive lower bound
   -> t -- ^ inclusive upper bound
   -> m -- ^ output token
   -> State s -- ^ from state
   -> State s -- ^ to state
-  -> Builder t m s ()
+  -> BuilderT t m s f ()
 transition lo hi output (State source) (State dest) =
-  Builder $ \i edges final -> Result i (Edge source dest lo hi output : edges) final ()
+  BuilderT $ \i edges final -> pure (Result i (Edge source dest lo hi output : edges) final ())
 
 -- | This does the same thing as 'build' except that you get to create a
 --   default state (distinct from the start state) that is used when a
 --   transition does not cover every token. With 'build', the start state
 --   is used for this, but it is often desirable to have a different state
 --   for this purpose.
-buildDefaulted :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
-  => (forall s. State s -> State s -> Builder t m s a)
-  -> Dfst t m
+buildDefaulted :: forall f t m a. (Monad f, Bounded t, Ord t, Enum t, Monoid m, Ord m)
+  => (forall s. State s -> State s -> BuilderT t m s  f a)
+  -> f (Dfst t m)
 buildDefaulted fromStartAndDefault =
   case do { (start, def) <- liftA2 (,) state state; _ <- fromStartAndDefault start def; pure def;} of
-    Builder f -> case f 0 [] [] of
-      Result totalStates edges final (State def) ->
+    BuilderT f -> f 0 [] [] >>=
+      \(Result totalStates edges final (State def)) ->
         internalBuild totalStates edges final def
 
 -- | The argument function turns a start state into an NFST builder. This
 -- function converts the builder to a usable transducer.
-build :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m) => (forall s. State s -> Builder t m s a) -> Dfst t m
+build :: forall f t m a. (Monad f, Bounded t, Ord t, Enum t, Monoid m, Ord m) => (forall s. State s -> BuilderT t m s f a) -> f (Dfst t m)
 build fromStartState =
   case state >>= fromStartState of
-    Builder f -> case f 0 [] [] of
-      Result totalStates edges final _ ->
+    BuilderT f -> f 0 [] [] >>=
+      \(Result totalStates edges final _) ->
         internalBuild totalStates edges final 0
 
-internalBuild :: forall t m. (Bounded t, Ord t, Enum t, Monoid m, Ord m)
-  => Int -> [Edge t m] -> [Int] -> Int -> Dfst t m
+internalBuild :: forall f t m. (Monad f, Bounded t, Ord t, Enum t, Monoid m, Ord m)
+  => Int -> [Edge t m] -> [Int] -> Int -> f (Dfst t m)
 internalBuild totalStates edges final def =
   let ts0 = runST $ do
         theTransitions <- C.replicateMutable totalStates (DM.pure Nothing)
@@ -277,7 +288,7 @@ internalBuild totalStates edges final def =
                   dests
                 )
         C.unsafeFreeze theTransitions
-   in Dfst (fmap (DM.map (maybe (MotionDfst def mempty) getLast)) ts0) (SU.fromList final)
+   in pure $ Dfst (fmap (DM.map (maybe (MotionDfst def mempty) getLast)) ts0) (SU.fromList final)
 
 -- collapse :: Dfst t m -> Dfst t m
 -- collapse = MotionDfst

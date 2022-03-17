@@ -23,6 +23,7 @@ module Automata.Internal
     -- * DFA Functions
   , union
   , intersection
+  , complement
   , acceptance
   , rejection
   , minimize
@@ -181,6 +182,9 @@ epsilonClosure s states = go states SU.empty where
     else
       let together = old <> new
        in go (mconcat (map (\ident -> transitionNfsaEpsilon (indexArray s ident)) (SU.toList together)) <> together) together
+
+complement :: Dfsa t -> Dfsa t
+complement dfsa = Dfsa (dfaTransition dfsa) (SU.fromList [0..PM.sizeofArray (dfaTransition dfsa) - 1] SU.\\ dfaFinal dfsa)
 
 data Node t = Node
   !Int -- identifier

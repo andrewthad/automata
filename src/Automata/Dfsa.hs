@@ -23,6 +23,7 @@ module Automata.Dfsa
     -- ** Composition
   , union
   , intersection
+  , complement
     -- ** Special DFA
   , acceptance
   , rejection

@@ -19,6 +19,7 @@ module Automata.Nfst
   , rejection
     -- * Builder
     -- ** Types
+  , BuilderT
   , Builder
   , State
     -- ** Functions
@@ -48,6 +49,10 @@ import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Map.Lifted.Unlifted as MLN
 import qualified Data.Primitive.Contiguous as C
 import qualified Data.Foldable as F
+import Data.Functor.Identity (Identity)
+import qualified Data.Semigroup as SG
+import Control.Monad.Trans.Class (MonadTrans (lift))
+import Control.Applicative (Applicative(liftA2))
 
 debugTrace :: Show a => a -> a
 debugTrace = id
@@ -128,60 +133,76 @@ toNfsa (Nfst t f) = Nfsa
   (fmap (\(TransitionNfst eps m) -> TransitionNfsa eps (DM.map (MLN.foldlWithKey' (\acc _ x -> acc <> x) mempty) m)) t)
   f
 
-newtype Builder t m s a = Builder (Int -> [Edge t m] -> [Epsilon] -> [Int] -> Result t m a)
+newtype BuilderT t m s f a = BuilderT (Int -> [Edge t m] -> [Epsilon] -> [Int] -> f (Result t m a))
   deriving stock (Functor)
+
+type Builder t m s a = BuilderT t m s Identity a
 
 data Result t m a = Result !Int ![Edge t m] ![Epsilon] ![Int] a
   deriving stock (Functor)
 
-instance Applicative (Builder t m s) where
-  pure a = Builder (\i es eps fs -> Result i es eps fs a)
-  Builder f <*> Builder g = Builder $ \i es eps fs -> case f i es eps fs of
-    Result i' es' eps' fs' x -> case g i' es' eps' fs' of
-      Result i'' es'' eps'' fs'' y -> Result i'' es'' eps'' fs'' (x y)
+instance Monad f => Applicative (BuilderT t m s f) where
+  pure a = BuilderT (\i es eps fs -> pure (Result i es eps fs a))
+  BuilderT f <*> BuilderT g = BuilderT $ \i es eps fs -> do
+    Result i' es' eps' fs' x <- f i es eps fs 
+    Result i'' es'' eps'' fs'' y <- g i' es' eps' fs' 
+    pure $ Result i'' es'' eps'' fs'' (x y)
 
-instance Monad (Builder t m s) where
-  Builder f >>= g = Builder $ \i es eps fs -> case f i es eps fs of
-    Result i' es' eps' fs' a -> case g a of
-      Builder g' -> g' i' es' eps' fs'
+instance Monad f => Monad (BuilderT t m s f) where
+  BuilderT f >>= g = BuilderT $ \i es eps fs -> do
+    Result i' es' eps' fs' a <- f i es eps fs
+    case g a of
+      BuilderT g' -> g' i' es' eps' fs'
+
+instance MonadTrans (BuilderT t m s) where
+  lift m =  BuilderT $ \i es ps is -> Result i es ps is <$> m
+
+instance (Monad f, Semigroup a) => Semigroup (BuilderT t m s f a) where
+  (<>) = liftA2 (SG.<>)
+
+instance (Monad f, Monoid a) => Monoid (BuilderT t s m f a) where
+  mempty = pure mempty
+  mappend = (SG.<>)
 
 -- | Generate a new state in the NFA. On any input, the
 --   state transitions to zero states.
-state :: Builder t m s (State s)
-state = Builder $ \i edges eps final -> Result (i + 1) edges eps final (State i)
+state :: Monad f => BuilderT t m s f (State s)
+state = BuilderT $ \i edges eps final -> pure (Result (i + 1) edges eps final (State i))
 
 -- | Mark a state as being an accepting state. 
-accept :: State s -> Builder t m s ()
-accept (State n) = Builder $ \i edges eps final -> Result i edges eps (n : final) ()
+accept :: Monad f => State s -> BuilderT t m s f ()
+accept (State n) = BuilderT $ \i edges eps final -> pure (Result i edges eps (n : final) ())
 
 -- | Add a transition from one state to another when the input token
 --   is inside the inclusive range.
 transition ::
+  Monad f =>
      t -- ^ inclusive lower bound
   -> t -- ^ inclusive upper bound
   -> m -- ^ output token
   -> State s -- ^ from state
   -> State s -- ^ to state
-  -> Builder t m s ()
+  -> BuilderT t m s f ()
 transition lo hi output (State source) (State dest) =
-  Builder $ \i edges eps final -> Result i (Edge source dest lo hi output : edges) eps final ()
+  BuilderT $ \i edges eps final -> pure (Result i (Edge source dest lo hi output : edges) eps final ())
 
 -- | Add a transition from one state to another that consumes no input.
 --   No output is generated on such a transition.
 epsilon ::
+  Monad f =>
      State s -- ^ from state
   -> State s -- ^ to state
-  -> Builder t m s ()
+  -> BuilderT t m s f ()
 epsilon (State source) (State dest) = 
-  Builder $ \i edges eps final -> Result i edges (if source /= dest then Epsilon source dest : eps else eps) final ()
+  BuilderT $ \i edges eps final -> pure (Result i edges (if source /= dest then Epsilon source dest : eps else eps) final ())
 
 -- | The argument function turns a start state into an NFST builder. This
 -- function converts the builder to a usable transducer.
-build :: forall t m a. (Bounded t, Ord t, Enum t, Monoid m, Ord m) => (forall s. State s -> Builder t m s a) -> Nfst t m
+build :: forall f t m a. (Monad f, Bounded t, Ord t, Enum t, Monoid m, Ord m) => (forall s. State s -> BuilderT t m s f a) -> f (Nfst t m)
 build fromStartState =
   case state >>= fromStartState of
-    Builder f -> case f 0 [] [] [] of
-      Result totalStates edges epsilons final _ ->
+    BuilderT f -> f 0 [] [] [] >>=
+      \(Result totalStates edges epsilons final _) ->
         let ts0 = runST $ do
               transitions <- C.replicateMutable totalStates (TransitionNfst SU.empty (DM.pure mempty))
               outbounds <- C.replicateMutable totalStates []
@@ -211,4 +232,4 @@ build fromStartState =
                       )
               C.unsafeFreeze transitions
             ts1 = C.imap (\s (TransitionNfst eps consume) -> TransitionNfst (epsilonClosure ts0 (SU.singleton s <> eps)) (DM.map (MLN.map (epsilonClosure ts0)) consume)) ts0
-         in Nfst ts1 (SU.fromList final)
+         in pure (Nfst ts1 (SU.fromList final))

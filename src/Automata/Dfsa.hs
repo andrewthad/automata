@@ -27,8 +27,9 @@ module Automata.Dfsa
     -- ** Special DFA
   , acceptance
   , rejection
-    -- * Builder
+    -- * BuilderT
     -- ** Types
+  , BuilderT
   , Builder
   , State
     -- ** Functions
@@ -43,7 +44,7 @@ module Automata.Dfsa
 
 import Prelude hiding (null)
 
-import Automata.Internal (Dfsa(..),State(..),union,intersection,acceptance,rejection,minimize)
+import Automata.Internal (Dfsa(..),State(..),union,intersection,acceptance,rejection,minimize, complement)
 import Control.Applicative (liftA2)
 import Data.Foldable (foldl',for_)
 import Data.Primitive (Array,PrimArray,Prim)
@@ -55,6 +56,9 @@ import qualified Data.Primitive.Contiguous as C
 import qualified Data.Map.Interval.DBTSLL as DM
 import qualified Data.Set.Unboxed as SU
 import qualified GHC.Exts as E
+import Data.Functor.Identity (Identity (Identity))
+import Control.Monad.Trans.Class (MonadTrans (lift))
+import qualified Data.Semigroup as SG
 
 -- | Evaluate a foldable collection of tokens against the DFA. This
 -- returns true if the string is accepted by the language.
@@ -108,19 +112,33 @@ subsumes x y = x == union x y
 disjoint :: (Ord t, Bounded t, Enum t) => Dfsa t -> Dfsa t -> Bool
 disjoint x y = intersection x y == rejection
 
-newtype Builder t s a = Builder (Int -> [Edge t] -> [Int] -> Result t a)
+newtype BuilderT t s m a = BuilderT (Int -> [Edge t] -> [Int] -> m (Result t a))
   deriving stock (Functor)
 
-instance Applicative (Builder t s) where
-  pure a = Builder (\i es fs -> Result i es fs a)
-  Builder f <*> Builder g = Builder $ \i es fs -> case f i es fs of
-    Result i' es' fs' x -> case g i' es' fs' of
-      Result i'' es'' fs'' y -> Result i'' es'' fs'' (x y)
+type Builder t s a = BuilderT t s Identity a
 
-instance Monad (Builder t s) where
-  Builder f >>= g = Builder $ \i es fs -> case f i es fs of
-    Result i' es' fs' a -> case g a of
-      Builder g' -> g' i' es' fs'
+instance Monad m => Applicative (BuilderT t s m) where
+  pure a = BuilderT (\i es fs -> pure $ Result i es fs a)
+  BuilderT f <*> BuilderT g = BuilderT $ \i es fs -> do
+    Result i' es' fs' x  <- f i es fs
+    Result i'' es'' fs'' y <- g i' es' fs'
+    pure $ Result i'' es'' fs'' (x y)
+
+instance Monad m => Monad (BuilderT t s m) where
+  BuilderT f >>= g = BuilderT $ \i es fs -> do
+    Result i' es' fs' a <- f i es fs
+    case g a of
+      BuilderT g' -> g' i' es' fs'
+
+instance MonadTrans (BuilderT t s) where
+  lift m = BuilderT $ \i es is -> Result i es is <$> m
+  
+instance (Monad m, Semigroup a) => Semigroup (BuilderT t s m a) where
+  (<>) = liftA2 (SG.<>)
+
+instance (Monad m, Monoid a) => Monoid (BuilderT t s m a) where
+  mempty = pure mempty
+  mappend = (SG.<>)
 
 data Result t a = Result !Int ![Edge t] ![Int] a
   deriving stock (Functor)
@@ -132,12 +150,12 @@ data EdgeDest t = EdgeDest !Int t t
 -- | The argument function takes a start state and builds an NFA. This
 -- function will execute the builder. Unspecified transitions move to
 -- the start state.
-build :: forall t a. (Bounded t, Ord t, Enum t)
-  => (forall s. State s -> Builder t s a) -> Dfsa t
+build :: forall m t a. (Monad m, Bounded t, Ord t, Enum t)
+  => (forall s. State s -> BuilderT t s m a) -> m (Dfsa t)
 build fromStartState =
   case state >>= fromStartState of
-    Builder f -> case f 0 [] [] of
-      Result totalStates edges final _ ->
+    BuilderT f -> f 0 [] [] >>=
+      \(Result totalStates edges final _) ->
         internalBuild totalStates edges final 0
 
 -- | This does the same thing as 'build' except that you get to create a
@@ -145,19 +163,19 @@ build fromStartState =
 --   transition does not cover every token. With 'build', the start state
 --   is used for this, but it is often desirable to have a different state
 --   for this purpose.
-buildDefaulted :: forall t a. (Bounded t, Ord t, Enum t)
-  => (forall s. State s -> State s -> Builder t s a)
-  -> Dfsa t
+buildDefaulted :: forall m t a. (Monad m, Bounded t, Ord t, Enum t)
+  => (forall s. State s -> State s -> BuilderT t s m a)
+  -> m (Dfsa t)
 buildDefaulted fromStartAndDefault =
   case do { (start, def) <- liftA2 (,) state state; _ <- fromStartAndDefault start def; pure def;} of
-    Builder f -> case f 0 [] [] of
-      Result totalStates edges final (State def) ->
+    BuilderT f -> f 0 [] [] >>=
+      \(Result totalStates edges final (State def)) ->
         internalBuild totalStates edges final def
 
 -- | The argument function takes a start state and builds an NFA. This
 -- function will execute the builder.
-internalBuild :: forall t. (Bounded t, Ord t, Enum t)
-  => Int -> [Edge t] -> [Int] -> Int -> Dfsa t
+internalBuild :: forall m t. (Monad m, Bounded t, Ord t, Enum t)
+  => Int -> [Edge t] -> [Int] -> Int -> m (Dfsa t)
 internalBuild totalStates edges final def =
   let ts = runST $ do
         transitions <- C.replicateMutable totalStates (DM.pure Nothing)
@@ -175,17 +193,17 @@ internalBuild totalStates edges final def =
                   dests
                 )
         C.unsafeFreeze transitions
-   in minimize (fmap (DM.map (maybe def getLast)) ts) (SU.fromList final)
+   in pure $ minimize (fmap (DM.map (maybe def getLast)) ts) (SU.fromList final)
 
 -- | Generate a new state in the NFA. On any input, the state transitions to
 --   the start state.
-state :: Builder t s (State s)
-state = Builder $ \i edges final ->
-  Result (i + 1) edges final (State i)
+state :: Monad m => BuilderT t s m (State s)
+state = BuilderT $ \i edges final ->
+  pure (Result (i + 1) edges final (State i))
 
 -- | Mark a state as being an accepting state.
-accept :: State s -> Builder t s ()
-accept (State n) = Builder $ \i edges final -> Result i edges (n : final) ()
+accept :: Monad m => State s -> BuilderT t s m ()
+accept (State n) = BuilderT $ \i edges final -> pure (Result i edges (n : final) ())
 
 -- | Add a transition from one state to another when the input token
 --   is inside the inclusive range. If multiple transitions from
@@ -197,7 +215,7 @@ transition ::
   -> State s -- ^ to state
   -> Builder t s ()
 transition lo hi (State source) (State dest) =
-  Builder $ \i edges final -> Result i (Edge source dest lo hi : edges) final ()
+  BuilderT $ \i edges final -> Identity (Result i (Edge source dest lo hi : edges) final ())
 
 toDot :: (Bounded t, Enum t) => (t -> t -> String) -> Dfsa t -> String
 toDot makeLabel (Dfsa ts fs) = concat $

@@ -175,4 +175,4 @@ partitionCardinality (Partition _ r) = do
 partitionStates :: Partition s -> ST s (PrimArray Int)
 partitionStates (Partition _ r) = do
   Metadata card arr <- readSTRef r
-  C.freeze arr 0 card
+  C.freeze (C.sliceMut arr 0 card)

@@ -8,10 +8,6 @@ description:
   Deterministic Finite State Automata (DFSA)
   .
   Non-Deterministic Finite State Automata (NFSA)
-  .
-  Deterministic Finite State Transducers (DFST)
-  .
-  Non-Deterministic Finite State Transducers (NFST)
 category: Data, Math
 homepage: https://github.com/andrewthad/automata
 bug-reports: https://github.com/andrewthad/automata/issues
@@ -35,25 +31,19 @@ library
     Automata.Dfsa
     Automata.Dfsa.Unboxed
     Automata.Nfsa
-    Automata.Nfsa.Builder
-    Automata.Nfst
-    Automata.Dfst
-    Automata.Dfst.Compact
-    Automata.Dfst.Compact.Unboxed
     Data.Bytes
   other-modules:
     Automata.Internal
-    Automata.Internal.Transducer
     Automata.Internal.Partition
   build-depends:
     , base >=4.10.1 && <5
-    , byteslice >=0.1 && <0.3
+    , byteslice >=0.2.9 && <0.3
     , bytestring >=0.10.8
-    , containers >=0.5.9 && <0.7
-    , contiguous >=0.4 && <0.6
-    , disjoint-containers >= 0.2.4 && <0.3
-    , primitive >=0.7 && <0.8
-    , primitive-containers >=0.4.1 && <0.5
+    , containers >=0.5.9
+    , contiguous >=0.4
+    , disjoint-containers >= 0.3
+    , primitive >=0.7 && <0.10
+    , primitive-containers >=0.4.1
     , semirings >= 0.3.1.1
     , transformers >= 0.5.5 && < 0.6
   ghc-options: -Wall -O2
